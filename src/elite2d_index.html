@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elite 2D</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #000; overflow: hidden; font-family: 'Share Tech Mono', monospace; color: #00ff88; }
+        canvas { display: block; }
+
+        #hud {
+            position: fixed; top: 0; left: 0; right: 0;
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 12px 20px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
+            pointer-events: none;
+            z-index: 10;
+        }
+        #hud-left { display: flex; flex-direction: column; gap: 4px; }
+        .hud-label { font-size: 0.7em; letter-spacing: 2px; color: #00ff8888; }
+        .hud-value { font-size: 1em; color: #00ff88; }
+        #pilot-name {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 0.9em; letter-spacing: 3px; color: #fff;
+        }
+        #logout-btn {
+            pointer-events: all;
+            background: transparent; border: 1px solid #ff444444;
+            color: #ff4444; font-family: 'Share Tech Mono', monospace;
+            font-size: 0.75em; letter-spacing: 2px;
+            padding: 6px 12px; cursor: pointer; border-radius: 2px;
+            transition: all 0.2s;
+        }
+        #logout-btn:hover { background: #ff444422; border-color: #ff4444; }
+
+        #landing-overlay {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            border: 1px solid #00ff88;
+            border-radius: 4px;
+            padding: 30px 50px;
+            text-align: center;
+            z-index: 100;
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translate(-50%, -48%); } to { opacity: 1; transform: translate(-50%, -50%); } }
+        #landing-overlay h2 { font-family: 'Orbitron', sans-serif; font-size: 1.5em; letter-spacing: 4px; color: #00ff88; margin-bottom: 10px; }
+        #landing-overlay p { color: #00ff8888; letter-spacing: 2px; font-size: 0.85em; }
+
+        #minimap {
+            position: fixed; bottom: 20px; right: 20px;
+            width: 160px; height: 160px;
+            border: 1px solid #00ff8833;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.7);
+            overflow: hidden;
+            z-index: 10;
+        }
+        #minimap canvas { display: block; }
+
+        #controls-hint {
+            position: fixed; bottom: 20px; left: 20px;
+            font-size: 0.7em; letter-spacing: 1px;
+            color: #00ff8844; line-height: 1.8;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+    <div id="hud-left">
+        <span class="hud-label">// PILOT</span>
+        <span id="pilot-name">---</span>
+    </div>
+    <div id="hud-center" style="text-align:center;">
+        <span class="hud-label">// RYCHLOST</span>
+        <div class="hud-value"><span id="speed-display">0</span> <span style="font-size:0.7em;color:#00ff8888">AU/s</span></div>
+    </div>
+    <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+        <span class="hud-value" id="location-display" style="font-size:0.8em; color:#00ff8888;">Hluboký vesmír</span>
+        <button id="logout-btn">[ ODHLÁSIT ]</button>
+    </div>
+</div>
+
+<div id="landing-overlay">
+    <h2>✓ PŘISTÁNO</h2>
+    <p id="landing-planet-name">NEZNÁMÁ PLANETA</p>
+</div>
+
+<div id="minimap"><canvas id="minimap-canvas" width="160" height="160"></canvas></div>
+
+<div id="controls-hint">
+    W / ↑ &nbsp; THRUST<br>
+    A/D / ←→ &nbsp; ROTATE<br>
+    S / ↓ &nbsp; BRAKE
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
