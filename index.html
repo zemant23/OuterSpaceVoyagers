@@ -6,99 +6,181 @@
     <title>Elite 2D</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #000; overflow: hidden; font-family: 'Share Tech Mono', monospace; color: #00ff88; }
-        canvas { display: block; }
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{background:#000;overflow:hidden;font-family:'Share Tech Mono',monospace;color:#00ff88}
+        canvas#game{display:block}
 
-        #hud {
-            position: fixed; top: 0; left: 0; right: 0;
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 12px 20px;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent);
-            pointer-events: none;
-            z-index: 10;
-        }
-        #hud-left { display: flex; flex-direction: column; gap: 4px; }
-        .hud-label { font-size: 0.7em; letter-spacing: 2px; color: #00ff8888; }
-        .hud-value { font-size: 1em; color: #00ff88; }
-        #pilot-name {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 0.9em; letter-spacing: 3px; color: #fff;
-        }
-        #logout-btn {
-            pointer-events: all;
-            background: transparent; border: 1px solid #ff444444;
-            color: #ff4444; font-family: 'Share Tech Mono', monospace;
-            font-size: 0.75em; letter-spacing: 2px;
-            padding: 6px 12px; cursor: pointer; border-radius: 2px;
-            transition: all 0.2s;
-        }
-        #logout-btn:hover { background: #ff444422; border-color: #ff4444; }
+        /* ── HUD ─────────────────────────────────────────────── */
+        #hud{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;
+            padding:10px 18px;background:linear-gradient(to bottom,rgba(0,0,0,.85),transparent);
+            pointer-events:none;z-index:10;gap:20px}
+        .hud-block{display:flex;flex-direction:column;gap:3px}
+        .hl{font-size:.65em;letter-spacing:2px;color:#00ff8866}
+        .hv{font-size:.95em;color:#00ff88}
+        #pilot-name{font-family:'Orbitron',sans-serif;font-size:.85em;letter-spacing:3px;color:#fff}
+        #logout-btn{pointer-events:all;background:transparent;border:1px solid #ff444455;color:#ff4444;
+            font-family:'Share Tech Mono',monospace;font-size:.7em;letter-spacing:2px;
+            padding:5px 10px;cursor:pointer;border-radius:2px;transition:all .2s}
+        #logout-btn:hover{background:#ff444422;border-color:#ff4444}
 
-        #landing-overlay {
-            position: fixed; top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.9);
-            border: 1px solid #00ff88;
-            border-radius: 4px;
-            padding: 30px 50px;
-            text-align: center;
-            z-index: 100;
-            display: none;
-            animation: fadeIn 0.3s ease;
-        }
-        @keyframes fadeIn { from { opacity: 0; transform: translate(-50%, -48%); } to { opacity: 1; transform: translate(-50%, -50%); } }
-        #landing-overlay h2 { font-family: 'Orbitron', sans-serif; font-size: 1.5em; letter-spacing: 4px; color: #00ff88; margin-bottom: 10px; }
-        #landing-overlay p { color: #00ff8888; letter-spacing: 2px; font-size: 0.85em; }
+        /* Fuel bar */
+        .fuel-hud{display:flex;align-items:center;gap:8px}
+        .fuel-hud-bar{width:80px;height:8px;background:#00ff8822;border-radius:3px;border:1px solid #00ff8833;overflow:hidden}
+        #fuel-bar-fill{height:100%;background:linear-gradient(90deg,#ff6600,#00ff88);border-radius:3px;transition:width .5s}
 
-        #minimap {
-            position: fixed; bottom: 20px; right: 20px;
-            width: 160px; height: 160px;
-            border: 1px solid #00ff8833;
-            border-radius: 50%;
-            background: rgba(0,0,0,0.7);
-            overflow: hidden;
-            z-index: 10;
-        }
-        #minimap canvas { display: block; }
+        /* ── DOCK PANEL ──────────────────────────────────────── */
+        #dock-panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+            width:min(820px,95vw);height:min(580px,90vh);
+            background:#040a0a;border:1px solid #00ff8833;border-radius:6px;
+            box-shadow:0 0 60px rgba(0,255,136,.08);
+            display:none;flex-direction:column;z-index:100;overflow:hidden;
+            animation:fadeUp .25s ease}
+        @keyframes fadeUp{from{opacity:0;transform:translate(-50%,-48%)}to{opacity:1;transform:translate(-50%,-50%)}}
+        #dock-header{padding:18px 24px 0;border-bottom:1px solid #00ff8820}
+        #dock-title{font-family:'Orbitron',sans-serif;font-size:1.3em;letter-spacing:3px;color:#fff;margin-bottom:4px}
+        #dock-desc{font-size:.75em;color:#00ff8866;letter-spacing:1px;margin-bottom:12px}
+        .dock-tabs{display:flex;gap:0}
+        .dtab{padding:8px 18px;background:none;border:none;border-bottom:2px solid transparent;
+            font-family:'Share Tech Mono',monospace;font-size:.8em;letter-spacing:2px;color:#00ff8866;
+            cursor:pointer;margin-bottom:-1px;transition:all .2s}
+        .dtab.active{color:#00ff88;border-bottom-color:#00ff88}
+        .dtab:hover{color:#00ff88bb}
+        #close-dock{position:absolute;top:14px;right:16px;background:none;border:none;
+            color:#aaa;font-size:1.4em;cursor:pointer;transition:color .2s}
+        #close-dock:hover{color:#ff4444}
+        #dock-content{flex:1;overflow-y:auto;padding:16px 24px}
+        #dock-content::-webkit-scrollbar{width:4px}
+        #dock-content::-webkit-scrollbar-track{background:#00ff8808}
+        #dock-content::-webkit-scrollbar-thumb{background:#00ff8844;border-radius:2px}
 
-        #controls-hint {
-            position: fixed; bottom: 20px; left: 20px;
-            font-size: 0.7em; letter-spacing: 1px;
-            color: #00ff8844; line-height: 1.8;
-            z-index: 10;
-        }
+        /* Market table */
+        .mkt-hdr{display:flex;justify-content:space-between;margin-bottom:12px;font-size:.85em;color:#00ff8888}
+        .mkt-tbl{width:100%;border-collapse:collapse;font-size:.82em}
+        .mkt-tbl th{text-align:left;padding:6px 8px;color:#00ff8866;letter-spacing:2px;font-size:.75em;border-bottom:1px solid #00ff8820}
+        .mkt-tbl td{padding:6px 8px;border-bottom:1px solid #00ff880a;color:#ccc}
+        .mkt-tbl tr:hover td{background:#00ff8808}
+        .mb{padding:4px 10px;border-radius:2px;border:1px solid;font-family:'Share Tech Mono',monospace;font-size:.75em;cursor:pointer;transition:all .15s;letter-spacing:1px;margin:1px}
+        .mb:disabled{opacity:.3;cursor:not-allowed}
+        .mb.buy{border-color:#00ff8855;color:#00ff88;background:transparent}
+        .mb.buy:not(:disabled):hover{background:#00ff8822}
+        .mb.sell{border-color:#ff444455;color:#ff6666;background:transparent}
+        .mb.sell:not(:disabled):hover{background:#ff444422}
+
+        /* Fuel panel */
+        .fuel-panel{padding:10px 0}
+        .fp-label{color:#00ff8888;font-size:.75em;letter-spacing:2px;margin-bottom:8px}
+        .fp-bar{width:100%;height:14px;background:#00ff8811;border:1px solid #00ff8833;border-radius:3px;overflow:hidden;margin-bottom:6px}
+        .fp-val{font-size:.85em;color:#00ff88;margin-bottom:4px}
+
+        /* Shipyard */
+        .yard-list{display:flex;flex-direction:column;gap:14px}
+        .yard-item{display:flex;gap:14px;align-items:center;padding:14px;border:1px solid #00ff8820;border-radius:4px;background:#00ff8806;transition:border-color .2s}
+        .yard-item.owned{border-color:#00ff8855;background:#00ff8810}
+        .yard-info{flex:1}
+        .yard-info h3{font-size:.95em;margin-bottom:4px}
+        .yard-info p{font-size:.78em;color:#aaa;margin-bottom:3px;line-height:1.5}
+        .yp{color:#ffd740;font-size:.9em;margin-top:6px!important}
+        .ybtn{align-self:center;padding:8px 16px!important}
+
+        /* ── SHIP CARD ──────────────────────────────────────── */
+        #ship-card{position:fixed;top:50%;right:20px;transform:translateY(-50%);
+            width:280px;background:#040a0a;border:1px solid #00ff8833;border-radius:6px;
+            padding:20px;display:none;flex-direction:column;gap:14px;z-index:100;
+            animation:fadeUp .2s ease}
+        #ship-card h2{font-family:'Orbitron',sans-serif;font-size:1em;letter-spacing:3px;color:#fff;text-align:center}
+        #sc-preview{display:block;background:#000;border:1px solid #00ff8822;border-radius:4px;margin:0 auto}
+        .sc-row{display:flex;justify-content:space-between;font-size:.8em;border-bottom:1px solid #00ff8810;padding-bottom:6px}
+        .sc-lbl{color:#00ff8866;letter-spacing:1px}
+        .sc-val{color:#fff}
+        .sc-fbar{height:6px;background:#00ff8822;border-radius:2px;overflow:hidden;margin-top:3px}
+        .sc-fbar-fill{height:100%;background:#00ff88;border-radius:2px;transition:width .5s}
+        #sc-clist{font-size:.78em;max-height:120px;overflow-y:auto}
+        .crow{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #00ff8808;color:#ccc}
+        #close-sc{background:none;border:none;color:#aaa;font-size:1.2em;cursor:pointer;position:absolute;top:10px;right:12px}
+        #close-sc:hover{color:#ff4444}
+
+        /* ── MISC ───────────────────────────────────────────── */
+        #minimap{position:fixed;bottom:20px;right:20px;width:160px;height:160px;border-radius:50%;overflow:hidden;z-index:10}
+        #controls-hint{position:fixed;bottom:20px;left:20px;font-size:.65em;letter-spacing:1px;color:#00ff8833;line-height:2;z-index:10}
+        #key-e-hint{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);
+            font-family:'Orbitron',sans-serif;font-size:.75em;letter-spacing:3px;color:#00ff88;
+            text-shadow:0 0 20px #00ff88;animation:pulse 1s infinite;display:none;z-index:10}
+        @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
     </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 
+<!-- HUD -->
 <div id="hud">
-    <div id="hud-left">
-        <span class="hud-label">// PILOT</span>
-        <span id="pilot-name">---</span>
+    <div class="hud-block">
+        <span class="hl">// PILOT</span>
+        <span id="pilot-name" class="hv">---</span>
     </div>
-    <div id="hud-center" style="text-align:center;">
-        <span class="hud-label">// RYCHLOST</span>
-        <div class="hud-value"><span id="speed-display">0</span> <span style="font-size:0.7em;color:#00ff8888">AU/s</span></div>
+    <div class="hud-block" style="align-items:center">
+        <span class="hl">// RYCHLOST</span>
+        <span class="hv"><span id="speed-display">0.0000</span> <span style="color:#00ff8866;font-size:.8em">AU/s</span></span>
     </div>
-    <div style="text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
-        <span class="hud-value" id="location-display" style="font-size:0.8em; color:#00ff8888;">Hluboký vesmír</span>
+    <div class="hud-block" style="align-items:center">
+        <span class="hl">// PALIVO</span>
+        <div class="fuel-hud">
+            <span class="hv" style="font-size:.85em" id="fuel-display">100</span>
+            <div class="fuel-hud-bar"><div id="fuel-bar-fill" style="width:100%"></div></div>
+        </div>
+    </div>
+    <div class="hud-block" style="align-items:center">
+        <span class="hl">// CREDITS</span>
+        <span class="hv" id="money-display">10 000</span>
+    </div>
+    <div class="hud-block" style="align-items:flex-end;gap:6px">
+        <span id="location-display" style="font-size:.75em;color:#00ff8855;letter-spacing:1px">Hluboký vesmír</span>
         <button id="logout-btn">[ ODHLÁSIT ]</button>
     </div>
 </div>
 
-<div id="landing-overlay">
-    <h2>✓ PŘISTÁNO</h2>
-    <p id="landing-planet-name">NEZNÁMÁ PLANETA</p>
+<!-- Dock hint -->
+<div id="key-e-hint">[ E ] DOKOVAT</div>
+
+<!-- Dock Panel -->
+<div id="dock-panel">
+    <div id="dock-header">
+        <div id="dock-title">STANICE</div>
+        <div id="dock-desc"></div>
+        <div class="dock-tabs">
+            <button class="dtab" data-tab="market" onclick="renderDockTab('market')">[ MARKET ]</button>
+            <button class="dtab" data-tab="fuel"   onclick="renderDockTab('fuel')"  >[ PALIVO ]</button>
+            <button class="dtab" id="tab-shipyard" data-tab="shipyard" onclick="renderDockTab('shipyard')" style="display:none">[ LODĚNICE ]</button>
+        </div>
+    </div>
+    <div id="dock-content"></div>
+    <button id="close-dock" onclick="closeAll()">✕</button>
 </div>
 
+<!-- Ship Card -->
+<div id="ship-card">
+    <button id="close-sc" onclick="closeAll()">✕</button>
+    <h2 id="sc-name">SIDEWINDER</h2>
+    <canvas id="sc-preview" width="120" height="80"></canvas>
+    <div class="sc-row"><span class="sc-lbl">PALIVO</span><span class="sc-val" id="sc-fuel">100/100</span></div>
+    <div class="sc-fbar"><div class="sc-fbar-fill" id="sc-fbar" style="width:100%"></div></div>
+    <div class="sc-row"><span class="sc-lbl">NÁKLAD</span><span class="sc-val" id="sc-cargo">0/10 t</span></div>
+    <div class="sc-row"><span class="sc-lbl">CREDITS</span><span class="sc-val" id="sc-money">10 000 Cr</span></div>
+    <div class="sc-row"><span class="sc-lbl">RYCHLOST</span><span class="sc-val" id="sc-speed">0 AU/s</span></div>
+    <div style="font-size:.7em;color:#00ff8866;letter-spacing:1px;margin-top:2px">// NÁKLAD</div>
+    <div id="sc-clist"></div>
+    <div style="font-size:.65em;color:#00ff8833;text-align:center;margin-top:4px">[ TAB ] zavřít</div>
+</div>
+
+<!-- Minimap -->
 <div id="minimap"><canvas id="minimap-canvas" width="160" height="160"></canvas></div>
 
+<!-- Controls -->
 <div id="controls-hint">
-    W / ↑ &nbsp; THRUST<br>
-    A/D / ←→ &nbsp; ROTATE<br>
-    S / ↓ &nbsp; BRAKE
+    W/↑ &nbsp;THRUST<br>
+    A/D &nbsp;ROTATE<br>
+    S/↓ &nbsp;BRAKE<br>
+    E &nbsp;&nbsp;&nbsp;DOCK<br>
+    TAB &nbsp;LOĎ
 </div>
 
 <script src="game.js"></script>
