@@ -162,7 +162,7 @@ document.addEventListener('keydown', e => {
     keys[e.code] = true;
     if (e.code === 'KeyE') tryDock();
     if (e.code === 'Tab') { e.preventDefault(); toggleShipCard(); }
-    if (e.code === 'Escape') closeAll();
+    if (e.code === 'Escape') { closeAll(); }
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
 
@@ -276,18 +276,15 @@ function getNearby() {
 }
 
 // ─── DOCKING ─────────────────────────────────────────────────────
-function tryDock() {
-    if (activePanel === 'dock') { closeAll(); return; }
-    const loc = getNearby();
-    if (!loc) return;
-    dockedAt = loc.id;
-    openDock(loc);
-}
+// tryDock přesunuto dolů jako dockingMinigame
 
 function closeAll() {
-    activePanel = null; dockedAt = null;
+    activePanel = null; dockedAt = null; docking.active = false;
     document.getElementById('dock-panel').style.display = 'none';
     document.getElementById('ship-card').style.display = 'none';
+    document.getElementById('dock-canvas').style.display = 'none';
+    document.getElementById('dock-hint').style.display = 'none';
+    dLastTime = null;
 }
 
 function toggleShipCard() {
@@ -605,3 +602,426 @@ function lighten(h,a){return `rgb(${Math.min(255,parseInt(h.slice(1,3),16)+a)},$
 function darken(h,a){return `rgb(${Math.max(0,parseInt(h.slice(1,3),16)-a)},${Math.max(0,parseInt(h.slice(3,5),16)-a)},${Math.max(0,parseInt(h.slice(5,7),16)-a)})`;}
 
 init();
+
+// ═══════════════════════════════════════════════════════════════
+//  DOKOVACÍ MINIHRA
+// ═══════════════════════════════════════════════════════════════
+
+// Stav dokování
+const docking = {
+    active: false,
+    loc: null,          // lokace (planet/station objekt)
+    slots: [],          // 4 sloty: { angle, occupied, id }
+    chosenSlot: null,   // vybraný slot (první volný)
+    // Loď v dokovací minihře (lokální souřadnice)
+    sx: 0, sy: 0,       // pozice
+    svx: 0, svy: 0,     // rychlost
+    sAngle: 0,          // úhel
+    // Tunel geometrie
+    tunnelAngle: 0,     // úhel tunelu (směr ke středu planety)
+    tunnelLen: 320,     // délka tunelu
+    tunnelW: 70,        // šířka na vstupu
+    tunnelWEnd: 38,     // šířka u hangáru
+    phase: 'approach',  // 'approach' | 'tunnel' | 'success' | 'fail'
+    timer: 0,
+    crashMsg: '',
+    progress: 0,        // 0..1 jak hluboko v tunelu
+};
+
+const dcv = document.getElementById('dock-canvas');
+const dcc = dcv ? dcv.getContext('2d') : null;
+
+function startDockingMinigame(loc) {
+    // Zjisti obsazenost slotů (simulace – ostatní hráči)
+    const slots = [];
+    for (let i = 0; i < 4; i++) {
+        const baseAngle = (Math.PI * 2 / 4) * i;
+        // Slot je obsazen pokud tam je hráč (pro teď simulujeme náhodně + ostatní hráči)
+        const occupied = otherPlayers.some(p => {
+            const dx = p.x - loc.currentX, dy = p.y - loc.currentY;
+            const a = Math.atan2(dy, dx);
+            const diff = Math.abs(((a - baseAngle) + Math.PI*3) % (Math.PI*2) - Math.PI);
+            return diff < 0.4 && Math.sqrt(dx*dx+dy*dy) < (loc.radius||40)+100;
+        });
+        slots.push({ angle: baseAngle, occupied, id: i });
+    }
+
+    const freeSlot = slots.find(s => !s.occupied);
+    if (!freeSlot) {
+        // Všechna místa obsazena
+        showFullMsg(loc);
+        return;
+    }
+
+    docking.active = true;
+    docking.loc = loc;
+    docking.slots = slots;
+    docking.chosenSlot = freeSlot;
+    docking.phase = 'approach';
+    docking.timer = 0;
+    docking.crashMsg = '';
+    docking.progress = 0;
+
+    // Tunel vede ze slotu ven (od středu planety)
+    docking.tunnelAngle = freeSlot.angle + Math.PI; // loď letí ZA tunnelAngle = dovnitř
+    const bodyR = (loc.radius || 30) + 20;
+    docking.tunnelLen = 300;
+    docking.tunnelW = 72;
+    docking.tunnelWEnd = 36;
+
+    // Vstupní pozice lodě = ústí tunelu + kousek ven
+    const entryDist = bodyR + docking.tunnelLen + 80;
+    docking.sx = Math.cos(freeSlot.angle) * entryDist;
+    docking.sy = Math.sin(freeSlot.angle) * entryDist;
+    docking.svx = 0; docking.svy = 0;
+    docking.sAngle = freeSlot.angle + Math.PI; // míří dovnitř
+
+    activePanel = 'docking';
+    dcv.style.display = 'block';
+    document.getElementById('dock-hint').style.display = 'block';
+    requestAnimationFrame(dockingLoop);
+}
+
+function showFullMsg(loc) {
+    // Zobrazíme overlay "Všechna místa obsazena"
+    const el = document.getElementById('dock-full-msg');
+    el.textContent = `${loc.name}: všechna dokovací místa jsou obsazena. Zkuste to znovu.`;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+// Přepsat tryDock aby spustil minihru
+function tryDock() {
+    if (activePanel === 'docking') return;
+    if (activePanel === 'dock') { closeAll(); return; }
+    const loc = getNearby();
+    if (!loc) return;
+    startDockingMinigame(loc);
+}
+
+let dLastTime = null;
+function dockingLoop(ts) {
+    if (!docking.active) return;
+    if (!dLastTime) dLastTime = ts;
+    const dt = Math.min((ts - dLastTime) / 1000, 0.05);
+    dLastTime = ts;
+
+    if (docking.phase === 'success' || docking.phase === 'fail') {
+        docking.timer -= dt;
+        if (docking.timer <= 0) {
+            if (docking.phase === 'success') {
+                docking.active = false;
+                dcv.style.display = 'none';
+                document.getElementById('dock-hint').style.display = 'none';
+                dLastTime = null;
+                activePanel = null;
+                dockedAt = docking.loc.id;
+                openDock(docking.loc);
+            } else {
+                // Fail – vyletíme zpět
+                docking.active = false;
+                activePanel = null;
+                dcv.style.display = 'none';
+                document.getElementById('dock-hint').style.display = 'none';
+                dLastTime = null;
+            }
+        }
+        drawDockingScene();
+        requestAnimationFrame(dockingLoop);
+        return;
+    }
+
+    updateDockingPhysics(dt);
+    checkDockingCollision();
+    drawDockingScene();
+    requestAnimationFrame(dockingLoop);
+}
+
+function updateDockingPhysics(dt) {
+    const ROT = 2.5, THRUST = 280, BRAKE = 0.97;
+    if (keys['KeyA'] || keys['ArrowLeft'])  docking.sAngle -= ROT * dt;
+    if (keys['KeyD'] || keys['ArrowRight']) docking.sAngle += ROT * dt;
+    if (keys['KeyW'] || keys['ArrowUp']) {
+        docking.svx += Math.cos(docking.sAngle) * THRUST * dt;
+        docking.svy += Math.sin(docking.sAngle) * THRUST * dt;
+    }
+    if (keys['KeyS'] || keys['ArrowDown']) {
+        docking.svx *= BRAKE;
+        docking.svy *= BRAKE;
+    }
+    docking.sx += docking.svx * dt;
+    docking.sy += docking.svy * dt;
+}
+
+function checkDockingCollision() {
+    const slot = docking.chosenSlot;
+    const loc = docking.loc;
+    const bodyR = (loc.radius || 30) + 20;
+
+    // Střed planety v dokovacím prostoru je vždy (0,0)
+    // Ústí tunelu:
+    const mouthX = Math.cos(slot.angle) * (bodyR + docking.tunnelLen);
+    const mouthY = Math.sin(slot.angle) * (bodyR + docking.tunnelLen);
+    // Konec tunelu (hangár):
+    const endX = Math.cos(slot.angle) * bodyR;
+    const endY = Math.sin(slot.angle) * bodyR;
+
+    // Projekce lodě na osu tunelu
+    const tDx = endX - mouthX, tDy = endY - mouthY;
+    const tLen = Math.sqrt(tDx*tDx + tDy*tDy);
+    const tNx = tDx/tLen, tNy = tDy/tLen; // normála tunelu (dovnitř)
+    const perpX = -tNy, perpY = tNx;       // kolmice
+
+    const rx = docking.sx - mouthX, ry = docking.sy - mouthY;
+    const along = rx*tNx + ry*tNy;   // 0..tLen = uvnitř tunelu
+    const perp  = rx*perpX + ry*perpY; // odchylka od osy
+
+    docking.progress = Math.max(0, along / tLen);
+
+    // Šířka tunelu v daném místě (lineárně se zužuje)
+    const halfW = (docking.tunnelW + (docking.tunnelWEnd - docking.tunnelW) * (along/tLen)) / 2;
+
+    // Jsme v tunelu?
+    const inTunnel = along >= -10 && along <= tLen + 5;
+
+    if (inTunnel) {
+        docking.phase = 'tunnel';
+        // Náraz do stěny?
+        if (Math.abs(perp) > halfW) {
+            triggerCrash();
+            return;
+        }
+        // Dosáhli jsme konce (hangáru)?
+        if (along >= tLen - 10) {
+            const spd = Math.sqrt(docking.svx**2 + docking.svy**2);
+            if (spd > 180) {
+                triggerCrash();
+            } else {
+                triggerSuccess();
+            }
+        }
+    }
+
+    // Náraz do těla planety/stanice
+    const distToCenter = Math.sqrt(docking.sx**2 + docking.sy**2);
+    if (distToCenter < bodyR - 5) {
+        triggerCrash();
+    }
+}
+
+function triggerCrash() {
+    docking.phase = 'fail';
+    docking.timer = 2.0;
+    // Ztráta části nákladu
+    const cargoIds = Object.keys(player.cargo);
+    if (cargoIds.length > 0) {
+        let lost = 0;
+        cargoIds.forEach(id => {
+            const dmg = Math.ceil((player.cargo[id] || 0) * 0.25);
+            player.cargo[id] = (player.cargo[id] || 0) - dmg;
+            lost += dmg;
+            if (player.cargo[id] <= 0) delete player.cargo[id];
+        });
+        docking.crashMsg = `NÁRAZ! Ztraceno ${lost}t nákladu.`;
+    } else {
+        docking.crashMsg = 'NÁRAZ! Poškozena loď.';
+        player.money = Math.max(0, player.money - 500);
+    }
+    // Odskočení
+    docking.svx = -docking.svx * 0.5;
+    docking.svy = -docking.svy * 0.5;
+}
+
+function triggerSuccess() {
+    docking.phase = 'success';
+    docking.timer = 0.8;
+}
+
+function drawDockingScene() {
+    const cw = dcv.width, ch = dcv.height;
+    const cx = cw / 2, cy = ch / 2;
+    const dctx = dcc;
+
+    dctx.fillStyle = '#fff';
+    dctx.fillRect(0, 0, cw, ch);
+
+    dctx.save();
+    dctx.translate(cx, cy);
+
+    const loc = docking.loc;
+    const bodyR = (loc.radius || 30) + 20;
+    const slot = docking.chosenSlot;
+
+    // ── Jemné hvězdičky na pozadí ──
+    dctx.fillStyle = 'rgba(0,0,0,0.06)';
+    for (let i = 0; i < 60; i++) {
+        const bx = Math.sin(i * 137.5) * 500;
+        const by = Math.cos(i * 137.5) * 500;
+        dctx.beginPath(); dctx.arc(bx, by, 1.2, 0, Math.PI*2); dctx.fill();
+    }
+
+    // ── Tělo planety/stanice ──
+    const pg = dctx.createRadialGradient(-bodyR*0.2, -bodyR*0.2, 0, 0, 0, bodyR);
+    pg.addColorStop(0, '#444'); pg.addColorStop(1, '#000');
+    dctx.beginPath(); dctx.arc(0, 0, bodyR, 0, Math.PI*2);
+    dctx.fillStyle = pg; dctx.fill();
+
+    // ── Všechny 4 sloty ──
+    docking.slots.forEach(s => {
+        const isChosen = s.id === slot.id;
+        const sa = s.angle;
+        const mouthX = Math.cos(sa) * (bodyR + docking.tunnelLen);
+        const mouthY = Math.sin(sa) * (bodyR + docking.tunnelLen);
+        const endX = Math.cos(sa) * bodyR;
+        const endY = Math.sin(sa) * bodyR;
+
+        // Stěny tunelu
+        const tDx = endX - mouthX, tDy = endY - mouthY;
+        const tLen2 = Math.sqrt(tDx*tDx+tDy*tDy);
+        const perpX2 = -tDy/tLen2, perpY2 = tDx/tLen2;
+        const hw = docking.tunnelW/2, hwE = docking.tunnelWEnd/2;
+
+        if (s.occupied) {
+            // Obsazený slot – červené X
+            dctx.strokeStyle = 'rgba(180,0,0,0.5)';
+            dctx.lineWidth = 2;
+            dctx.beginPath();
+            dctx.moveTo(mouthX - perpX2*hw, mouthY - perpY2*hw);
+            dctx.lineTo(endX - perpX2*hwE, endY - perpY2*hwE);
+            dctx.lineTo(endX + perpX2*hwE, endY + perpY2*hwE);
+            dctx.lineTo(mouthX + perpX2*hw, mouthY + perpY2*hw);
+            dctx.closePath();
+            dctx.fillStyle = 'rgba(200,0,0,0.07)'; dctx.fill(); dctx.stroke();
+            // X přes vstup
+            dctx.strokeStyle = 'rgba(200,0,0,0.6)'; dctx.lineWidth = 3;
+            dctx.beginPath();
+            dctx.moveTo(mouthX - perpX2*hw, mouthY - perpY2*hw);
+            dctx.lineTo(mouthX + perpX2*hw, mouthY + perpY2*hw);
+            dctx.stroke();
+        } else if (isChosen) {
+            // Aktivní tunel – černé stěny
+            dctx.strokeStyle = '#000';
+            dctx.lineWidth = 2.5;
+            dctx.beginPath();
+            dctx.moveTo(mouthX - perpX2*hw, mouthY - perpY2*hw);
+            dctx.lineTo(endX - perpX2*hwE, endY - perpY2*hwE);
+            dctx.lineTo(endX + perpX2*hwE, endY + perpY2*hwE);
+            dctx.lineTo(mouthX + perpX2*hw, mouthY + perpY2*hw);
+            dctx.closePath();
+            dctx.fillStyle = 'rgba(0,0,0,0.06)'; dctx.fill(); dctx.stroke();
+
+            // Vodící čára (osa tunelu) přerušovaná
+            dctx.setLineDash([8, 8]);
+            dctx.strokeStyle = 'rgba(0,0,0,0.15)'; dctx.lineWidth = 1;
+            dctx.beginPath();
+            dctx.moveTo(mouthX, mouthY); dctx.lineTo(endX, endY);
+            dctx.stroke(); dctx.setLineDash([]);
+
+            // Progress indikátor – jak hluboko jsme
+            if (docking.phase === 'tunnel') {
+                const prog = docking.progress;
+                const px = mouthX + (endX - mouthX) * prog;
+                const py = mouthY + (endY - mouthY) * prog;
+                dctx.beginPath(); dctx.arc(px, py, 4, 0, Math.PI*2);
+                dctx.fillStyle = 'rgba(0,0,0,0.3)'; dctx.fill();
+            }
+
+            // Hangár (cíl) – výrazný otvor
+            dctx.fillStyle = '#fff';
+            dctx.fillRect(endX - perpX2*hwE - 2, endY - perpY2*hwE - 2,
+                          (perpX2*hwE*2)+4, (perpY2*hwE*2)+4);
+            dctx.strokeStyle = '#000'; dctx.lineWidth = 3;
+            dctx.beginPath();
+            dctx.moveTo(endX - perpX2*hwE, endY - perpY2*hwE);
+            dctx.lineTo(endX + perpX2*hwE, endY + perpY2*hwE);
+            dctx.stroke();
+        } else {
+            // Volný slot (ale ne vybraný) – šedý
+            dctx.strokeStyle = 'rgba(0,0,0,0.2)'; dctx.lineWidth = 1;
+            dctx.beginPath();
+            dctx.moveTo(mouthX - perpX2*hw, mouthY - perpY2*hw);
+            dctx.lineTo(endX - perpX2*hwE, endY - perpY2*hwE);
+            dctx.lineTo(endX + perpX2*hwE, endY + perpY2*hwE);
+            dctx.lineTo(mouthX + perpX2*hw, mouthY + perpY2*hw);
+            dctx.closePath();
+            dctx.fillStyle = 'rgba(0,0,0,0.03)'; dctx.fill(); dctx.stroke();
+        }
+    });
+
+    // ── Loď hráče ──
+    dctx.save();
+    dctx.translate(docking.sx, docking.sy);
+    dctx.rotate(docking.sAngle);
+    const thrusting = keys['KeyW'] || keys['ArrowUp'];
+    SHIP_TYPES[player.shipType].draw(dctx, thrusting);
+    dctx.restore();
+
+    // ── Rychlostní indikátor ──
+    const spd = Math.sqrt(docking.svx**2 + docking.svy**2);
+    const maxSafe = 180;
+    const spdColor = spd > maxSafe ? 'rgba(180,0,0,0.8)' : 'rgba(0,0,0,0.5)';
+    dctx.fillStyle = spdColor;
+    dctx.font = '13px "Share Tech Mono",monospace';
+    dctx.textAlign = 'left';
+    dctx.fillText(`RYCHLOST: ${Math.round(spd)} ${spd > maxSafe ? '⚠ PŘÍLIŠ RYCHLE' : '✓'}`, -cx + 20, -cy + 30);
+
+    // ── Progress bar ──
+    if (docking.phase === 'tunnel') {
+        const barW = 200, barH = 8;
+        const bx = -barW/2, by = cy - 50;
+        dctx.fillStyle = 'rgba(0,0,0,0.1)';
+        dctx.fillRect(bx, by, barW, barH);
+        dctx.fillStyle = 'rgba(0,0,0,0.7)';
+        dctx.fillRect(bx, by, barW * docking.progress, barH);
+        dctx.fillStyle = 'rgba(0,0,0,0.4)';
+        dctx.font = '10px "Share Tech Mono",monospace'; dctx.textAlign = 'center';
+        dctx.fillText('PRŮCHOD TUNELEM', 0, by - 4);
+    }
+
+    // ── Zprávy ──
+    if (docking.phase === 'success') {
+        dctx.fillStyle = 'rgba(0,0,0,0.85)';
+        dctx.font = 'bold 22px "Orbitron",sans-serif'; dctx.textAlign = 'center';
+        dctx.fillText('✓ DOKOVÁNÍ ÚSPĚŠNÉ', 0, -30);
+    }
+    if (docking.phase === 'fail') {
+        dctx.fillStyle = 'rgba(160,0,0,0.9)';
+        dctx.font = 'bold 20px "Orbitron",sans-serif'; dctx.textAlign = 'center';
+        dctx.fillText(docking.crashMsg, 0, -30);
+        // Shake efekt
+        dctx.translate((Math.random()-0.5)*6, (Math.random()-0.5)*6);
+    }
+
+    // Název lokace
+    dctx.fillStyle = 'rgba(0,0,0,0.3)';
+    dctx.font = '11px "Share Tech Mono",monospace'; dctx.textAlign = 'right';
+    dctx.fillText(loc.name.toUpperCase(), cx - 16, -cy + 24);
+
+    dctx.restore();
+
+    // Slot indikátor (vně canvas translate)
+    drawSlotIndicator(dctx, cw, ch);
+}
+
+function drawSlotIndicator(dctx, cw, ch) {
+    // 4 čtverečky vlevo dole
+    const startX = 20, startY = ch - 60;
+    dctx.font = '10px "Share Tech Mono",monospace';
+    dctx.fillStyle = 'rgba(0,0,0,0.4)';
+    dctx.fillText('SLOTY', startX, startY - 6);
+    docking.slots.forEach((s, i) => {
+        const bx = startX + i * 28, by = startY;
+        dctx.strokeStyle = '#000'; dctx.lineWidth = 1.5;
+        dctx.fillStyle = s.occupied ? 'rgba(180,0,0,0.3)' :
+                         (s.id === docking.chosenSlot?.id ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.05)');
+        dctx.fillRect(bx, by, 20, 20); dctx.strokeRect(bx, by, 20, 20);
+        if (s.id === docking.chosenSlot?.id) {
+            dctx.fillStyle = '#000'; dctx.font = '9px monospace'; dctx.textAlign = 'center';
+            dctx.fillText('▼', bx + 10, by + 14);
+        }
+        if (s.occupied) {
+            dctx.fillStyle = 'rgba(180,0,0,0.7)'; dctx.font = '9px monospace'; dctx.textAlign = 'center';
+            dctx.fillText('✕', bx + 10, by + 14);
+        }
+    });
+}
