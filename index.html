@@ -27,10 +27,10 @@
         #fuel-bar-fill{height:100%;background:#000;border-radius:3px;transition:width .5s}
 
         /* cargo toggle btn */
-        #cargo-toggle{pointer-events:all;background:#fff;border:1px solid #ccc;color:#000;
+        #cargo-toggle,#map-toggle{pointer-events:all;background:#fff;border:1px solid #ccc;color:#000;
             font-family:'Share Tech Mono',monospace;font-size:.65em;letter-spacing:1px;
             padding:4px 10px;cursor:pointer;border-radius:2px;transition:all .2s}
-        #cargo-toggle:hover{background:#000;color:#fff}
+        #cargo-toggle:hover,#map-toggle:hover{background:#000;color:#fff}
 
         /* ── CARGO TABLE ── */
         #cargo-table-panel{position:fixed;top:60px;left:18px;width:240px;
@@ -128,6 +128,20 @@
             font-family:'Orbitron',sans-serif;font-size:.85em;letter-spacing:2px;color:#000;
             z-index:300;text-align:center;border-radius:3px}
 
+
+        /* ── STAR MAP ── */
+        #star-map-overlay{display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+            width:min(700px,90vw);height:min(540px,85vh);
+            background:#fff;border:1px solid #ddd;border-radius:4px;
+            box-shadow:0 4px 30px rgba(0,0,0,.1);z-index:150;
+            flex-direction:column;animation:fadeUp .2s ease}
+        #star-map-overlay.open{display:flex}
+        #sm-header{display:flex;justify-content:space-between;align-items:center;
+            padding:14px 20px;border-bottom:1px solid #eee}
+        #sm-header h2{font-family:'Orbitron',sans-serif;font-size:.9em;letter-spacing:3px;color:#000}
+        #sm-close{background:none;border:none;color:#ccc;font-size:1.2em;cursor:pointer}
+        #sm-close:hover{color:#000}
+        #sm-canvas{flex:1;display:block;width:100%}
         /* ── MISC ── */
         #minimap{position:fixed;bottom:18px;right:18px;width:160px;height:160px;
             border-radius:50%;overflow:hidden;z-index:10;border:1px solid rgba(0,0,0,.15)}
@@ -166,6 +180,7 @@
     </div>
     <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;pointer-events:all">
         <button id="cargo-toggle">[ NÁKLAD ]</button>
+        <button id="map-toggle">[ MAPA ]</button>
         <button id="logout-btn">[ ODHLÁSIT ]</button>
     </div>
 </div>
@@ -207,6 +222,16 @@
 <canvas id="dock-canvas"></canvas>
 <div id="dock-hint">W/↑ THRUST &nbsp;|&nbsp; A/D ROTATE &nbsp;|&nbsp; S BRAKE &nbsp;|&nbsp; ESC ZRUŠIT</div>
 <div id="dock-full-msg"></div>
+
+
+<!-- Star Map -->
+<div id="star-map-overlay">
+    <div id="sm-header">
+        <h2>HVĚZDNÁ MAPA</h2>
+        <button id="sm-close" onclick="closeStarMap()">✕</button>
+    </div>
+    <canvas id="sm-canvas"></canvas>
+</div>
 
 <!-- Minimap -->
 <div id="minimap"><canvas id="minimap-canvas" width="160" height="160"></canvas></div>

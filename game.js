@@ -292,6 +292,170 @@ let dockedAt = null;
 let dockTab = 'market';
 let cargoTableVisible = false;
 
+
+// ═══════════════════════════════════════════════════════════════
+//  HVĚZDNÁ MAPA
+// ═══════════════════════════════════════════════════════════════
+let starMapOpen = false;
+let smDrag = null; // pro posun mapy
+let smOffset = {x:0, y:0};
+let smScale = 1;
+
+function openStarMap() {
+    starMapOpen = true;
+    const overlay = document.getElementById('star-map-overlay');
+    overlay.classList.add('open');
+    renderStarMap();
+}
+
+function closeStarMap() {
+    starMapOpen = false;
+    document.getElementById('star-map-overlay').classList.remove('open');
+}
+
+function renderStarMap() {
+    const canvas = document.getElementById('sm-canvas');
+    if (!canvas) return;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width  = rect.width;
+    canvas.height = rect.height - 52; // minus header
+
+    const ctx2 = canvas.getContext('2d');
+    const cw = canvas.width, ch = canvas.height;
+    const cx = cw/2 + smOffset.x, cy = ch/2 + smOffset.y;
+
+    // Zjisti rozsah všech soustav pro auto-fit
+    const allSys = getAllSystems();
+    if (allSys.length === 0) return;
+    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+    allSys.forEach(s=>{ minX=Math.min(minX,s.x); maxX=Math.max(maxX,s.x); minY=Math.min(minY,s.y); maxY=Math.max(maxY,s.y); });
+    const rangeX = Math.max(maxX-minX, ILY*0.5);
+    const rangeY = Math.max(maxY-minY, ILY*0.5);
+    const autoScale = Math.min((cw-80)/rangeX, (ch-80)/rangeY) * smScale;
+    const mapCX = (minX+maxX)/2;
+    const mapCY = (minY+maxY)/2;
+
+    function wx(x) { return cx + (x - mapCX) * autoScale; }
+    function wy(y) { return cy + (y - mapCY) * autoScale; }
+
+    // Pozadí
+    ctx2.fillStyle = '#fff';
+    ctx2.fillRect(0, 0, cw, ch);
+
+    // Jemná mřížka
+    ctx2.strokeStyle = 'rgba(0,0,0,0.04)';
+    ctx2.lineWidth = 1;
+    for (let gx = 0; gx < cw; gx+=40) { ctx2.beginPath(); ctx2.moveTo(gx,0); ctx2.lineTo(gx,ch); ctx2.stroke(); }
+    for (let gy = 0; gy < ch; gy+=40) { ctx2.beginPath(); ctx2.moveTo(0,gy); ctx2.lineTo(cw,gy); ctx2.stroke(); }
+
+    // Spojovací čáry vzdáleností (k nejbližším sousedům)
+    ctx2.strokeStyle = 'rgba(0,0,0,0.07)';
+    ctx2.lineWidth = 1;
+    ctx2.setLineDash([3,6]);
+    allSys.forEach(a => {
+        allSys.forEach(b => {
+            if (a.id >= b.id) return;
+            const d = Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2);
+            if (d < ILY * 3) {
+                ctx2.beginPath();
+                ctx2.moveTo(wx(a.x), wy(a.y));
+                ctx2.lineTo(wx(b.x), wy(b.y));
+                ctx2.stroke();
+            }
+        });
+    });
+    ctx2.setLineDash([]);
+
+    // Soustavy
+    allSys.forEach(sys => {
+        const sx = wx(sys.x), sy = wy(sys.y);
+        if (sx < -20 || sx > cw+20 || sy < -20 || sy > ch+20) return;
+
+        // Hvězdička záře
+        const starR = Math.max(4, (sys.starRadius||40) * autoScale * 0.008);
+        const g = ctx2.createRadialGradient(sx,sy,0,sx,sy,starR*3);
+        g.addColorStop(0,'rgba(0,0,0,0.15)'); g.addColorStop(1,'transparent');
+        ctx2.beginPath(); ctx2.arc(sx,sy,starR*3,0,Math.PI*2); ctx2.fillStyle=g; ctx2.fill();
+
+        // Hvězda
+        ctx2.beginPath(); ctx2.arc(sx,sy,Math.max(3,starR),0,Math.PI*2);
+        ctx2.fillStyle='#000'; ctx2.fill();
+
+        // Název soustavy
+        ctx2.fillStyle='rgba(0,0,0,0.7)';
+        ctx2.font='bold 10px "Orbitron",sans-serif';
+        ctx2.textAlign='center';
+        ctx2.fillText(sys.name.toUpperCase(), sx, sy - Math.max(3,starR) - 7);
+
+        // Planety (malé tečky s názvy)
+        sys.planets.forEach((p, i) => {
+            const orbitR = p.distanceAU * AU * autoScale;
+            if (orbitR < 1) return; // příliš malé
+
+            // Orbit kruh (jen pro blízké soustavy)
+            if (orbitR > 8) {
+                ctx2.beginPath(); ctx2.arc(sx, sy, orbitR, 0, Math.PI*2);
+                ctx2.strokeStyle='rgba(0,0,0,0.06)'; ctx2.lineWidth=1; ctx2.stroke();
+            }
+
+            // Pozice planety
+            const pa = p.orbitAngle || 0;
+            const px2 = sx + Math.cos(pa)*orbitR;
+            const py2 = sy + Math.sin(pa)*orbitR;
+
+            // Jen pokud je orbit viditelný
+            if (orbitR < 4) return;
+
+            const pr = Math.max(2, (p.radius||12) * autoScale * 0.012);
+            ctx2.beginPath(); ctx2.arc(px2, py2, Math.max(2, pr), 0, Math.PI*2);
+            ctx2.fillStyle='#000'; ctx2.fill();
+
+            // Název planety
+            if (orbitR > 12) {
+                ctx2.fillStyle='rgba(0,0,0,0.5)';
+                ctx2.font='9px "Share Tech Mono",monospace';
+                ctx2.textAlign='center';
+                ctx2.fillText(p.name, px2, py2 - Math.max(2,pr) - 4);
+            }
+        });
+    });
+
+    // Hráčova pozice (křížek)
+    const px = wx(ship.x), py = wy(ship.y);
+    ctx2.strokeStyle='#000'; ctx2.lineWidth=1.5;
+    ctx2.beginPath(); ctx2.moveTo(px-6,py); ctx2.lineTo(px+6,py); ctx2.stroke();
+    ctx2.beginPath(); ctx2.moveTo(px,py-6); ctx2.lineTo(px,py+6); ctx2.stroke();
+    ctx2.beginPath(); ctx2.arc(px,py,4,0,Math.PI*2);
+    ctx2.strokeStyle='rgba(0,0,0,0.4)'; ctx2.lineWidth=1; ctx2.stroke();
+
+    // Legenda
+    ctx2.fillStyle='rgba(0,0,0,0.25)';
+    ctx2.font='9px "Share Tech Mono",monospace';
+    ctx2.textAlign='left';
+    ctx2.fillText('+ VAŠE POZICE', 12, ch-10);
+    ctx2.textAlign='right';
+    ctx2.fillText(`${allSys.length} SOUSTAV OBJEVENO`, cw-12, ch-10);
+
+    // Scroll hint
+    ctx2.fillStyle='rgba(0,0,0,0.15)';
+    ctx2.textAlign='center';
+    ctx2.fillText('SCROLL = ZOOM', cw/2, ch-10);
+}
+
+// Zoom kolečkem myši
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        const smCanvas = document.getElementById('sm-canvas');
+        if (!smCanvas) return;
+        smCanvas.addEventListener('wheel', e => {
+            if (!starMapOpen) return;
+            e.preventDefault();
+            smScale = Math.max(0.3, Math.min(8, smScale * (e.deltaY < 0 ? 1.15 : 0.87)));
+            renderStarMap();
+        }, {passive:false});
+    }, 500);
+});
+
 // ─── INIT ────────────────────────────────────────────────────────
 async function init() {
     try {
@@ -306,6 +470,10 @@ async function init() {
         await savePlayer();
         await fetch('/api/logout',{method:'POST'});
         window.location.href='/login';
+    });
+
+    document.getElementById('map-toggle').addEventListener('click', ()=>{
+        if (starMapOpen) closeStarMap(); else openStarMap();
     });
 
     document.getElementById('cargo-toggle').addEventListener('click', ()=>{
@@ -436,6 +604,7 @@ function tryDock() {
 
 function closeAll() {
     activePanel=null; dockedAt=null; docking.active=false;
+    closeStarMap();
     document.getElementById('dock-panel').style.display='none';
     document.getElementById('ship-card').style.display='none';
     document.getElementById('dock-canvas').style.display='none';
@@ -797,6 +966,7 @@ function gameLoop(ts){
     const dt=Math.min((ts-lastTime)*60/1000*60,5);
     lastTime=ts;
     updatePhysics(dt); draw();
+    if(starMapOpen) renderStarMap();
     requestAnimationFrame(gameLoop);
 }
 
