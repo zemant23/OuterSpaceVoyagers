@@ -86,7 +86,8 @@ const SYSTEMS_DATA = [
             {id:'st_ceres',   name:'Ceres Outpost',   angleAU:1.35, orbitAngle:4.1, orbitSpeed:0.000075, type:'trade',    description:'Těžební stanice v pásu asteroidů.'},
             {id:'st_foundry', name:'Foundry Shipyard',angleAU:0.85, orbitAngle:5.5, orbitSpeed:0.00013,  type:'shipyard', description:'⭐ Loděnice – zde koupíš nové lodě.'},
             {id:'st_frontier',name:'Frontier Dock',   angleAU:1.68, orbitAngle:2.8, orbitSpeed:0.000052, type:'shipyard', description:'⭐ Loděnice – zde koupíš nové lodě.'},
-        ]
+        ],
+        infoSat:{id:'sol_infosat', name:'Sol Info Beacon', angleAU:2.0, orbitAngle:0.5, orbitSpeed:0.00004}
     },
     {
         // Alpha Centauri – 4.37 LY od Slunce, směr ~přibližně jih-západ
@@ -101,7 +102,8 @@ const SYSTEMS_DATA = [
         stations:[
             {id:'ac_hub',   name:'Centauri Hub',    angleAU:0.55, orbitAngle:1.0, orbitSpeed:0.00012, type:'trade',    description:'Obchodní centrum soustavy Alpha Centauri.'},
             {id:'ac_yard',  name:'New Hope Shipyard',angleAU:1.0,  orbitAngle:3.0, orbitSpeed:0.00008, type:'shipyard', description:'⭐ Loděnice – vzdálená od Sol.'},
-        ]
+        ],
+        infoSat:{id:'ac_infosat', name:'Centauri Info Beacon', angleAU:1.4, orbitAngle:2.0, orbitSpeed:0.00006}
     },
     {
         // Barnardova hvězda – 5.96 LY, směr sever
@@ -114,7 +116,8 @@ const SYSTEMS_DATA = [
         ],
         stations:[
             {id:'bs_outpost', name:'Red Outpost', angleAU:0.7, orbitAngle:2.0, orbitSpeed:0.00011, type:'trade', description:'Odlehlá obchodní stanice u červeného trpaslíka.'},
-        ]
+        ],
+        infoSat:{id:'bs_infosat', name:"Barnard Info Beacon", angleAU:1.0, orbitAngle:4.5, orbitSpeed:0.00009}
     }
 ];
 
@@ -189,7 +192,8 @@ function tryGenerateSystem(px, py) {
             angleAU:planets[0].distanceAU+0.2+Math.random()*0.3,
             orbitAngle:Math.random()*Math.PI*2, orbitSpeed:0.00008+Math.random()*0.0001,
             type:'trade', description:`Vzdálená obchodní stanice v soustavě ${sysName}.`
-        }]
+        }],
+        infoSat:{id:`${id}_infosat`, name:`${sysName} Beacon`, angleAU:planets[planets.length-1].distanceAU+0.5, orbitAngle:Math.random()*Math.PI*2, orbitSpeed:0.00003+Math.random()*0.00003}
     };
     generatedSystems.push(newSys);
     saveGeneratedSystem(newSys);
@@ -371,6 +375,18 @@ function renderStarMap() {
         const sx = wx(sys.x), sy = wy(sys.y);
         if (sx < -20 || sx > cw+20 || sy < -20 || sy > ch+20) return;
 
+        // Info satelit na hvězdné mapě – čtvereček
+        if (sys.infoSat) {
+            const pa = sys.infoSat.orbitAngle || 0;
+            const orbitR = sys.infoSat.angleAU * AU * autoScale;
+            const ix = sx + Math.cos(pa)*orbitR;
+            const iy = sy + Math.sin(pa)*orbitR;
+            if (orbitR > 6) {
+                ctx2.strokeStyle='rgba(0,0,0,0.5)'; ctx2.lineWidth=1;
+                ctx2.strokeRect(ix-3, iy-3, 6, 6);
+            }
+        }
+
         // Hvězdička záře
         const starR = Math.max(4, (sys.starRadius||40) * autoScale * 0.008);
         const g = ctx2.createRadialGradient(sx,sy,0,sx,sy,starR*3);
@@ -513,6 +529,10 @@ function initSystemPositions(sys) {
         s.currentX = sys.x + Math.cos(s.orbitAngle)*s.angleAU*AU;
         s.currentY = sys.y + Math.sin(s.orbitAngle)*s.angleAU*AU;
     });
+    if (sys.infoSat) {
+        sys.infoSat.currentX = sys.x + Math.cos(sys.infoSat.orbitAngle)*sys.infoSat.angleAU*AU;
+        sys.infoSat.currentY = sys.y + Math.sin(sys.infoSat.orbitAngle)*sys.infoSat.angleAU*AU;
+    }
 }
 
 async function savePlayer() {
@@ -564,6 +584,11 @@ function updatePhysics(dt) {
             s.currentX=sys.x+Math.cos(s.orbitAngle)*s.angleAU*AU;
             s.currentY=sys.y+Math.sin(s.orbitAngle)*s.angleAU*AU;
         });
+        if (sys.infoSat) {
+            sys.infoSat.orbitAngle+=sys.infoSat.orbitSpeed*dt;
+            sys.infoSat.currentX=sys.x+Math.cos(sys.infoSat.orbitAngle)*sys.infoSat.angleAU*AU;
+            sys.infoSat.currentY=sys.y+Math.sin(sys.infoSat.orbitAngle)*sys.infoSat.angleAU*AU;
+        }
     });
 
     camera.x=ship.x-W/2; camera.y=ship.y-H/2;
@@ -572,7 +597,8 @@ function updatePhysics(dt) {
 
     const nearby=getNearby();
     const el=document.getElementById('location-display');
-    if (nearby) { el.textContent=`[E] Dokovat – ${nearby.name}`; el.style.color='#000'; }
+    if (nearby && nearby._isInfoSat) { el.textContent=`[E] Info Beacon – ${nearby._sys.name}`; el.style.color='#000'; }
+    else if (nearby) { el.textContent=`[E] Dokovat – ${nearby.name}`; el.style.color='#000'; }
     else { el.textContent='Hluboký vesmír'; el.style.color='#aaa'; }
 
     checkWorldGen();
@@ -589,6 +615,10 @@ function getNearby() {
             if (!s.currentX) continue;
             if (Math.sqrt((ship.x-s.currentX)**2+(ship.y-s.currentY)**2) < 65) return s;
         }
+        if (sys.infoSat && sys.infoSat.currentX) {
+            const d = Math.sqrt((ship.x-sys.infoSat.currentX)**2+(ship.y-sys.infoSat.currentY)**2);
+            if (d < 55) return {_isInfoSat:true, _sys:sys, id:sys.infoSat.id, name:sys.infoSat.name};
+        }
     }
     return null;
 }
@@ -596,15 +626,17 @@ function getNearby() {
 // ─── PANELS ──────────────────────────────────────────────────────
 function tryDock() {
     if (activePanel==='docking') return;
-    if (activePanel==='dock') { closeAll(); return; }
+    if (activePanel==='dock'||activePanel==='infosat') { closeAll(); return; }
     const loc=getNearby();
     if (!loc) return;
+    if (loc._isInfoSat) { openInfoSat(loc._sys); return; }
     startDockingMinigame(loc);
 }
 
 function closeAll() {
     activePanel=null; dockedAt=null; docking.active=false;
     closeStarMap();
+    closeInfoSat();
     document.getElementById('dock-panel').style.display='none';
     document.getElementById('ship-card').style.display='none';
     document.getElementById('dock-canvas').style.display='none';
@@ -885,6 +917,31 @@ function drawSystem(sys) {
         ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.font='bold 13px "Orbitron",sans-serif'; ctx.textAlign='center';
         ctx.fillText(sys.name.toUpperCase(), sys.x, sys.y - sys.starRadius - 20);
     }
+
+    // Info satelit (čtvereček)
+    if (sys.infoSat && sys.infoSat.currentX) {
+        const sx=sys.infoSat.currentX, sy=sys.infoSat.currentY;
+        // Orbit čára
+        ctx.beginPath(); ctx.arc(sys.x,sys.y,sys.infoSat.angleAU*AU,0,Math.PI*2);
+        ctx.strokeStyle='rgba(0,0,0,0.04)'; ctx.lineWidth=1; ctx.setLineDash([2,8]); ctx.stroke(); ctx.setLineDash([]);
+        // Čtvereček – blikající
+        const bl=(Math.sin(Date.now()*.003)+1)/2;
+        ctx.save(); ctx.translate(sx,sy); ctx.rotate(Date.now()*0.0005);
+        ctx.strokeStyle='#000'; ctx.lineWidth=1.5;
+        ctx.globalAlpha=0.5+bl*0.5;
+        ctx.strokeRect(-7,-7,14,14);
+        // Vnitřní tečka
+        ctx.beginPath(); ctx.arc(0,0,2,0,Math.PI*2);
+        ctx.fillStyle='#000'; ctx.fill();
+        ctx.globalAlpha=1;
+        ctx.restore();
+        // Dock ring
+        dockRing(sx,sy,55);
+        // Popisek
+        ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.font='9px "Share Tech Mono",monospace'; ctx.textAlign='center';
+        ctx.fillText('INFO', sx, sy-14);
+        ctx.fillText('[E]', sx, sy+20);
+    }
 }
 
 function dockRing(x,y,r){
@@ -942,6 +999,15 @@ function drawMM(){
                 mctx.fillStyle='#555'; mctx.fill();
             });
         }
+    });
+
+    // Info satelity na minimapě – čtverečky
+    getAllSystems().forEach(sys=>{
+        if(!sys.infoSat||!sys.infoSat.currentX)return;
+        const ix=cx+sys.infoSat.currentX*MMS, iy=cy+sys.infoSat.currentY*MMS;
+        if(Math.abs(ix-cx)>MM/2+4||Math.abs(iy-cy)>MM/2+4)return;
+        mctx.strokeStyle='rgba(0,0,0,0.7)'; mctx.lineWidth=1;
+        mctx.strokeRect(ix-2.5,iy-2.5,5,5);
     });
 
     // Hráč
@@ -1326,3 +1392,102 @@ function drawSlotIndicator(dctx,cw,ch){
 }
 
 init();
+
+// ═══════════════════════════════════════════════════════════════
+//  INFO SATELIT – panel s cenami a průzkumem trhu
+// ═══════════════════════════════════════════════════════════════
+const SCAN_COST = 500; // Cr za průzkum top 10 cen jedné komodity
+
+function openInfoSat(sys) {
+    activePanel = 'infosat';
+    const panel = document.getElementById('infosat-panel');
+    panel.style.display = 'flex';
+    document.getElementById('is-sysname').textContent = sys.name.toUpperCase();
+    renderInfoSatMain(sys);
+}
+
+function closeInfoSat() {
+    const p = document.getElementById('infosat-panel');
+    const r = document.getElementById('is-scan-result');
+    if (p) p.style.display = 'none';
+    if (r) r.style.display = 'none';
+}
+
+// Tabulka cen všech planet soustavy
+function renderInfoSatMain(sys) {
+    const locs = [...sys.planets, ...(sys.stations||[])];
+    let h = `<div class="is-section-title">// CENY V SOUSTAVĚ</div>`;
+    h += `<table class="is-tbl"><thead><tr><th>Lokace</th>`;
+    COMMODITIES.forEach(c => { h += `<th title="${c.name}">${c.name.slice(0,4).toUpperCase()}</th>`; });
+    h += `</tr></thead><tbody>`;
+    locs.forEach(loc => {
+        h += `<tr><td class="is-locname">${loc.name}</td>`;
+        COMMODITIES.forEach(c => {
+            const pr = getMarketPrice(loc.id, c.id);
+            const base = c.basePrice;
+            const ratio = pr / base;
+            const cls = ratio < 0.85 ? 'is-cheap' : ratio > 1.15 ? 'is-expensive' : '';
+            h += `<td class="${cls}">${pr}</td>`;
+        });
+        h += `</tr>`;
+    });
+    h += `</tbody></table>`;
+
+    // Průzkum trhu – výběr komodity za poplatek
+    h += `<div class="is-section-title" style="margin-top:16px">// PRŮZKUM TRHU <span style="color:#aaa;font-size:.85em">(${SCAN_COST} Cr)</span></div>`;
+    h += `<p style="font-size:.75em;color:#aaa;margin-bottom:10px">Vyber komoditu – zobrazíme TOP 10 nejlepších cen napříč celou galaxií.</p>`;
+    h += `<div class="is-com-grid">`;
+    COMMODITIES.forEach(c => {
+        h += `<button class="is-com-btn" onclick="buyScan('${c.id}','${c.name}')">${c.name}</button>`;
+    });
+    h += `</div>`;
+    h += `<p id="is-scan-msg" style="color:#c00;font-size:.78em;margin-top:8px;min-height:16px"></p>`;
+
+    document.getElementById('is-content').innerHTML = h;
+    document.getElementById('is-scan-result').style.display = 'none';
+}
+
+function buyScan(commodityId, commodityName) {
+    if (player.money < SCAN_COST) {
+        const el = document.getElementById('is-scan-msg');
+        if (el) { el.textContent = `Nedostatek Cr! Potřebuješ ${SCAN_COST} Cr.`; }
+        return;
+    }
+    player.money -= SCAN_COST;
+    updateMoneyAll();
+
+    // Sesbírej ceny ze všech lokací ve všech soustavách
+    const results = [];
+    getAllSystems().forEach(sys => {
+        [...sys.planets, ...(sys.stations||[])].forEach(loc => {
+            const pr = getMarketPrice(loc.id, commodityId);
+            results.push({ locName: loc.name, sysName: sys.name, price: pr, locId: loc.id });
+        });
+    });
+
+    // Seřaď od nejlevnějšího
+    results.sort((a, b) => a.price - b.price);
+    const top10 = results.slice(0, 10);
+
+    // Zobraz výsledek
+    const res = document.getElementById('is-scan-result');
+    let h = `<div class="is-section-title">// TOP 10 – ${commodityName.toUpperCase()}</div>`;
+    h += `<table class="is-tbl"><thead><tr><th>#</th><th>Lokace</th><th>Soustava</th><th>Cena/t</th></tr></thead><tbody>`;
+    top10.forEach((r, i) => {
+        const cls = i === 0 ? 'is-cheap' : i < 3 ? '' : 'is-expensive';
+        h += `<tr class="${i===0?'is-best-row':''}">
+            <td style="color:#aaa">${i+1}</td>
+            <td>${r.locName}</td>
+            <td style="color:#888">${r.sysName}</td>
+            <td class="${cls}"><b>${r.price} Cr</b></td>
+        </tr>`;
+    });
+    h += `</tbody></table>`;
+    h += `<p style="font-size:.72em;color:#bbb;margin-top:8px">Ceny se mění každých 30s. Průzkum byl zaplacen.</p>`;
+    res.innerHTML = h;
+    res.style.display = 'block';
+
+    // Skryj zprávu o nedostatku
+    const el = document.getElementById('is-scan-msg');
+    if (el) el.textContent = '';
+}
