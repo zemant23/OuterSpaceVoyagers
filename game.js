@@ -262,7 +262,7 @@ const camera = {x:0, y:0};
 const ship = {
     x:AU*1.05, y:0, vx:0, vy:0, angle:0, thrusting:false,
     thrustBase:0.0003, thrustExp:1.6, rotSpeed:0.045,
-    landRadius:55, fuelBurn:0.012,
+    landRadius:55, fuelBurn:0.0012,
 };
 
 // ─── INPUT ───────────────────────────────────────────────────────
