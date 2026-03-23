@@ -626,18 +626,36 @@ function updateCompass() {
     if (!waypoint) { el.style.display = 'none'; return; }
     el.style.display = 'flex';
     const dx = waypoint.x - ship.x, dy = waypoint.y - ship.y;
-    const angle = Math.atan2(dy, dx); // světový úhel k waypointu
-    const relAngle = angle - ship.angle; // relativně k lodi (kompas)
+    const angle = Math.atan2(dy, dx);
+    const relAngle = angle - ship.angle;
     const dist = Math.sqrt(dx*dx + dy*dy);
     const distStr = dist > ILY*0.5
         ? `${(dist/ILY).toFixed(2)} LY`
         : dist > AU*5
         ? `${(dist/AU).toFixed(1)} AU`
-        : `${Math.round(dist/AU*100)/100} AU`;
+        : `${(dist/AU).toFixed(2)} AU`;
     document.getElementById('compass-dist').textContent = distStr;
     document.getElementById('compass-name').textContent = waypoint.name;
-    // Otočí šipku
-    document.getElementById('compass-arrow').style.transform = `rotate(${relAngle}rad)`;
+    // Nakresli šipku na canvas
+    const cv = document.getElementById('compass-arrow-canvas');
+    if (!cv) return;
+    const cc = cv.getContext('2d');
+    const s = cv.width / 2;
+    cc.clearRect(0, 0, cv.width, cv.height);
+    cc.save();
+    cc.translate(s, s);
+    cc.rotate(relAngle + Math.PI/2); // +90° protože šipka míří nahoru
+    // Tučná šipka
+    cc.beginPath();
+    cc.moveTo(0, -s+4);           // špička
+    cc.lineTo(s-4, s-4);          // pravý dolní roh
+    cc.lineTo(s*0.35, s*0.1);     // pravý zářez
+    cc.lineTo(-s*0.35, s*0.1);    // levý zářez
+    cc.lineTo(-(s-4), s-4);       // levý dolní roh
+    cc.closePath();
+    cc.fillStyle = '#000';
+    cc.fill();
+    cc.restore();
 }
 
 // ─── INIT ────────────────────────────────────────────────────────
@@ -726,7 +744,9 @@ function updatePhysics(dt) {
         player.fuel = Math.max(0, player.fuel - ship.fuelBurn*dt);
         updateFuelBar();
     }
-    if (keys['KeyS']||keys['ArrowDown']) { ship.vx*=0.97; ship.vy*=0.97; }
+    if (keys['KeyS']||keys['ArrowDown']) { ship.vx*=0.92; ship.vy*=0.92; }
+    // Bez aktivního tahu se loď postupně zastaví
+    if (!ship.thrusting) { ship.vx*=0.94; ship.vy*=0.94; }
 
     // Gravitace nejbližší hvězdy
     getAllSystems().forEach(sys => {

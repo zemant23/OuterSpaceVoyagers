@@ -129,7 +129,7 @@
         #compass-name{font-family:'Orbitron',sans-serif;font-size:.6em;letter-spacing:2px;color:#000;text-align:center}
         #compass-dist{font-size:.75em;color:#555;letter-spacing:1px;text-align:center}
         #compass-arrow-wrap{width:36px;height:36px;position:relative;display:flex;align-items:center;justify-content:center}
-        #compass-arrow{font-size:22px;color:#000;display:block;transition:transform .15s linear;line-height:1}
+        #compass-arrow-canvas{display:block}
         #compass-clear{position:absolute;top:4px;right:6px;background:none;border:none;color:#ccc;
             font-size:.9em;cursor:pointer;pointer-events:all}
         #compass-clear:hover{color:#000}
@@ -301,7 +301,7 @@
     <button id="compass-clear" onclick="waypoint=null;updateCompass();" title="Zrušit waypoint">✕</button>
     <div id="compass-name">---</div>
     <div id="compass-arrow-wrap">
-        <span id="compass-arrow">▲</span>
+        <canvas id="compass-arrow-canvas" width="40" height="40"></canvas>
     </div>
     <div id="compass-dist">0 AU</div>
 </div>
