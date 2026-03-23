@@ -1118,14 +1118,19 @@ let dLastTime = null;
 
 // ── Pomocné – platformy layout ────────────────────────────────
 function buildPlatforms(occupiedCount) {
-    // 4 platformy: 2 nahoře (čísla 3,4), 2 dole (čísla 1,2)
-    // x relativně ke středu prostoru, y od středu
+    // 6 platforem: 3 dole (1,2,3) + 3 nahoře (4,5,6), rovnoměrně rozmístěné
     const halfW = DOCK_W / 2;
+    const innerW = DOCK_W - WALL_T; // použitelná šířka (bez pravé zdi)
+    const startX = -halfW + WALL_T; // x od levé zdi (za vstupem)
+    const step = (innerW - WALL_T) / 3; // 3 stejné sekce
+    const xs = [startX + step*0.5, startX + step*1.5, startX + step*2.5];
     const plats = [
-        { id:0, label:'1', x: -halfW + PLAT_MARGIN + PLAT_W/2,  y:  DOCK_H/2 - WALL_T - PLAT_H },
-        { id:1, label:'2', x:  halfW - PLAT_MARGIN - PLAT_W/2,  y:  DOCK_H/2 - WALL_T - PLAT_H },
-        { id:2, label:'3', x: -halfW + PLAT_MARGIN + PLAT_W/2,  y: -DOCK_H/2 + WALL_T },
-        { id:3, label:'4', x:  halfW - PLAT_MARGIN - PLAT_W/2,  y: -DOCK_H/2 + WALL_T },
+        { id:0, label:'1', x: xs[0], y:  DOCK_H/2 - WALL_T - PLAT_H },
+        { id:1, label:'2', x: xs[1], y:  DOCK_H/2 - WALL_T - PLAT_H },
+        { id:2, label:'3', x: xs[2], y:  DOCK_H/2 - WALL_T - PLAT_H },
+        { id:3, label:'4', x: xs[0], y: -DOCK_H/2 + WALL_T },
+        { id:4, label:'5', x: xs[1], y: -DOCK_H/2 + WALL_T },
+        { id:5, label:'6', x: xs[2], y: -DOCK_H/2 + WALL_T },
     ];
     // Náhodně obsaď platforms podle ostatních hráčů
     let occ = Math.min(occupiedCount, 3);
@@ -1296,7 +1301,7 @@ function checkDockCollisions() {
     // Náraz do NPC
     for (const n of docking.npcs) {
         const dx = sx - n.x, dy = sy - n.y;
-        if (Math.sqrt(dx*dx+dy*dy) < 22) {
+        if (Math.sqrt(dx*dx+dy*dy) < 28) {
             triggerDockCrash('SRÁŽKA S NPC!'); return;
         }
     }
@@ -1477,12 +1482,14 @@ function drawDockNPCs(dctx) {
         dctx.rotate(n.angle);
         // Jednoduchá NPC loď – malý trojúhelník
         dctx.beginPath();
-        dctx.moveTo(12, 0); dctx.lineTo(-8, -5); dctx.lineTo(-8, 5);
+        dctx.moveTo(22, 0); dctx.lineTo(-14, -9); dctx.lineTo(-9, 0); dctx.lineTo(-14, 9);
         dctx.closePath();
-        dctx.fillStyle = 'rgba(0,0,0,0.4)';
+        dctx.fillStyle = 'rgba(0,0,0,0.55)';
         dctx.strokeStyle = '#000';
-        dctx.lineWidth = 1;
+        dctx.lineWidth = 1.5;
         dctx.fill(); dctx.stroke();
+        dctx.beginPath(); dctx.arc(8, 0, 3, 0, Math.PI*2);
+        dctx.fillStyle = '#000'; dctx.fill();
         dctx.restore();
     });
 }
