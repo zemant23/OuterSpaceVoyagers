@@ -322,209 +322,310 @@ let cargoTableVisible = false;
 
 
 // ═══════════════════════════════════════════════════════════════
-//  HVĚZDNÁ MAPA
+//  HVĚZDNÁ MAPA  v3  – drag, zoom, waypoint, kompas
 // ═══════════════════════════════════════════════════════════════
 let starMapOpen = false;
-let smDrag = null; // pro posun mapy
-let smOffset = {x:0, y:0};
+let smOffset = { x: 0, y: 0 };
 let smScale = 1;
+let smDrag = null;
+// autoScale a mapCX/mapCY – sdílené mezi render a click handlerem
+let _smAutoScale = 1, _smMapCX = 0, _smMapCY = 0, _smCX = 0, _smCY = 0;
+
+// Waypoint – cíl navigace
+let waypoint = null; // { x, y, name } ve světových souřadnicích
 
 function openStarMap() {
     starMapOpen = true;
-    const overlay = document.getElementById('star-map-overlay');
-    overlay.classList.add('open');
+    // Reset pohledu při prvním otevření
+    if (smScale === 1 && smOffset.x === 0 && smOffset.y === 0) {
+        smScale = 1; smOffset = {x:0, y:0};
+    }
+    document.getElementById('star-map-overlay').classList.add('open');
     renderStarMap();
 }
-
 function closeStarMap() {
     starMapOpen = false;
     document.getElementById('star-map-overlay').classList.remove('open');
 }
 
+// Převod: svět → canvas
+function smWX(x) { return _smCX + (x - _smMapCX) * _smAutoScale; }
+function smWY(y) { return _smCY + (y - _smMapCY) * _smAutoScale; }
+// Převod: canvas → svět
+function smInvX(sx) { return (sx - _smCX) / _smAutoScale + _smMapCX; }
+function smInvY(sy) { return (sy - _smCY) / _smAutoScale + _smMapCY; }
+
 function renderStarMap() {
     const canvas = document.getElementById('sm-canvas');
     if (!canvas) return;
-    const rect = canvas.parentElement.getBoundingClientRect();
-    canvas.width  = rect.width;
-    canvas.height = rect.height - 52; // minus header
+    const rect = canvas.getBoundingClientRect();
+    canvas.width  = Math.floor(rect.width)  || 600;
+    canvas.height = Math.floor(rect.height) || 440;
 
     const ctx2 = canvas.getContext('2d');
     const cw = canvas.width, ch = canvas.height;
-    const cx = cw/2 + smOffset.x, cy = ch/2 + smOffset.y;
 
-    // Zjisti rozsah všech soustav pro auto-fit
+    // Auto-fit: najdi rozsah soustav
     const allSys = getAllSystems();
-    if (allSys.length === 0) return;
-    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
-    allSys.forEach(s=>{ minX=Math.min(minX,s.x); maxX=Math.max(maxX,s.x); minY=Math.min(minY,s.y); maxY=Math.max(maxY,s.y); });
-    const rangeX = Math.max(maxX-minX, ILY*0.5);
-    const rangeY = Math.max(maxY-minY, ILY*0.5);
-    const autoScale = Math.min((cw-80)/rangeX, (ch-80)/rangeY) * smScale;
-    const mapCX = (minX+maxX)/2;
-    const mapCY = (minY+maxY)/2;
+    if (!allSys.length) return;
+    let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+    allSys.forEach(s => { minX=Math.min(minX,s.x); maxX=Math.max(maxX,s.x); minY=Math.min(minY,s.y); maxY=Math.max(maxY,s.y); });
+    // Přidej trochu okraje
+    const padX = (maxX-minX)*0.15 || ILY*0.3;
+    const padY = (maxY-minY)*0.15 || ILY*0.3;
+    minX-=padX; maxX+=padX; minY-=padY; maxY+=padY;
+    const rangeX = maxX - minX, rangeY = maxY - minY;
+    const baseScale = Math.min((cw-20)/rangeX, (ch-20)/rangeY);
 
-    function wx(x) { return cx + (x - mapCX) * autoScale; }
-    function wy(y) { return cy + (y - mapCY) * autoScale; }
+    _smAutoScale = baseScale * smScale;
+    _smMapCX = (minX + maxX) / 2;
+    _smMapCY = (minY + maxY) / 2;
+    _smCX = cw/2 + smOffset.x;
+    _smCY = ch/2 + smOffset.y;
 
-    // Pozadí
+    // ── Pozadí ──
     ctx2.fillStyle = '#fff';
     ctx2.fillRect(0, 0, cw, ch);
 
-    // Jemná mřížka
+    // ── Mřížka ──
     ctx2.strokeStyle = 'rgba(0,0,0,0.04)';
     ctx2.lineWidth = 1;
-    for (let gx = 0; gx < cw; gx+=40) { ctx2.beginPath(); ctx2.moveTo(gx,0); ctx2.lineTo(gx,ch); ctx2.stroke(); }
-    for (let gy = 0; gy < ch; gy+=40) { ctx2.beginPath(); ctx2.moveTo(0,gy); ctx2.lineTo(cw,gy); ctx2.stroke(); }
+    for (let gx=0; gx<cw; gx+=40) { ctx2.beginPath(); ctx2.moveTo(gx,0); ctx2.lineTo(gx,ch); ctx2.stroke(); }
+    for (let gy=0; gy<ch; gy+=40) { ctx2.beginPath(); ctx2.moveTo(0,gy); ctx2.lineTo(cw,gy); ctx2.stroke(); }
 
-    // Spojovací čáry vzdáleností (k nejbližším sousedům)
+    // ── Spojovací čáry ──
     ctx2.strokeStyle = 'rgba(0,0,0,0.07)';
     ctx2.lineWidth = 1;
-    ctx2.setLineDash([3,6]);
+    ctx2.setLineDash([3, 6]);
     allSys.forEach(a => {
         allSys.forEach(b => {
             if (a.id >= b.id) return;
-            const d = Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2);
-            if (d < ILY * 3) {
+            if (Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2) < ILY*3) {
                 ctx2.beginPath();
-                ctx2.moveTo(wx(a.x), wy(a.y));
-                ctx2.lineTo(wx(b.x), wy(b.y));
+                ctx2.moveTo(smWX(a.x), smWY(a.y));
+                ctx2.lineTo(smWX(b.x), smWY(b.y));
                 ctx2.stroke();
             }
         });
     });
     ctx2.setLineDash([]);
 
-    // Soustavy
-    allSys.forEach(sys => {
-        const sx = wx(sys.x), sy = wy(sys.y);
-        if (sx < -20 || sx > cw+20 || sy < -20 || sy > ch+20) return;
+    // ── Waypoint čára ──
+    if (waypoint) {
+        const wpx = smWX(waypoint.x), wpy = smWY(waypoint.y);
+        const ppx = smWX(ship.x),     ppy = smWY(ship.y);
+        ctx2.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx2.lineWidth = 1;
+        ctx2.setLineDash([5, 5]);
+        ctx2.beginPath(); ctx2.moveTo(ppx, ppy); ctx2.lineTo(wpx, wpy); ctx2.stroke();
+        ctx2.setLineDash([]);
+        // Waypoint ikona – X v kroužku
+        ctx2.strokeStyle = 'rgba(0,0,0,0.7)'; ctx2.lineWidth = 1.5;
+        ctx2.beginPath(); ctx2.arc(wpx, wpy, 8, 0, Math.PI*2); ctx2.stroke();
+        ctx2.beginPath(); ctx2.moveTo(wpx-5,wpy-5); ctx2.lineTo(wpx+5,wpy+5); ctx2.stroke();
+        ctx2.beginPath(); ctx2.moveTo(wpx+5,wpy-5); ctx2.lineTo(wpx-5,wpy+5); ctx2.stroke();
+        // Vzdálenost na čáře
+        const dist = Math.sqrt((waypoint.x-ship.x)**2+(waypoint.y-ship.y)**2);
+        const distAU = dist / AU;
+        const distStr = distAU > 1000 ? `${(dist/ILY).toFixed(1)} LY` : `${distAU.toFixed(1)} AU`;
+        const midX = (ppx+wpx)/2, midY = (ppy+wpy)/2;
+        ctx2.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx2.font = '9px "Share Tech Mono",monospace';
+        ctx2.textAlign = 'center';
+        ctx2.fillText(distStr, midX, midY - 4);
+        // Název waypointu
+        ctx2.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx2.font = '9px "Share Tech Mono",monospace';
+        ctx2.fillText(waypoint.name, wpx, wpy - 14);
+    }
 
-        // Info satelit na hvězdné mapě – čtvereček
+    // ── Soustavy ──
+    allSys.forEach(sys => {
+        const sx = smWX(sys.x), sy = smWY(sys.y);
+        if (sx < -30 || sx > cw+30 || sy < -30 || sy > ch+30) return;
+
+        // Info satelit
         if (sys.infoSat) {
-            const pa = sys.infoSat.orbitAngle || 0;
-            const orbitR = sys.infoSat.angleAU * AU * autoScale;
-            const ix = sx + Math.cos(pa)*orbitR;
-            const iy = sy + Math.sin(pa)*orbitR;
-            if (orbitR > 6) {
-                ctx2.strokeStyle='rgba(0,0,0,0.5)'; ctx2.lineWidth=1;
+            const orbitR = sys.infoSat.angleAU * AU * _smAutoScale;
+            if (orbitR > 5) {
+                const ix = sx + Math.cos(sys.infoSat.orbitAngle)*orbitR;
+                const iy = sy + Math.sin(sys.infoSat.orbitAngle)*orbitR;
+                ctx2.strokeStyle = 'rgba(0,0,0,0.45)'; ctx2.lineWidth = 1;
                 ctx2.strokeRect(ix-3, iy-3, 6, 6);
             }
         }
 
-        // Hvězdička záře
-        const starR = Math.max(4, (sys.starRadius||40) * autoScale * 0.008);
-        const g = ctx2.createRadialGradient(sx,sy,0,sx,sy,starR*3);
-        g.addColorStop(0,'rgba(0,0,0,0.15)'); g.addColorStop(1,'transparent');
-        ctx2.beginPath(); ctx2.arc(sx,sy,starR*3,0,Math.PI*2); ctx2.fillStyle=g; ctx2.fill();
+        // Záře hvězdy
+        const starR = Math.max(3, (sys.starRadius||40) * _smAutoScale * 0.008);
+        const g = ctx2.createRadialGradient(sx,sy,0,sx,sy,starR*3.5);
+        g.addColorStop(0,'rgba(0,0,0,0.12)'); g.addColorStop(1,'transparent');
+        ctx2.beginPath(); ctx2.arc(sx,sy,starR*3.5,0,Math.PI*2); ctx2.fillStyle=g; ctx2.fill();
 
         // Hvězda
         ctx2.beginPath(); ctx2.arc(sx,sy,Math.max(3,starR),0,Math.PI*2);
-        ctx2.fillStyle='#000'; ctx2.fill();
+        ctx2.fillStyle = '#000'; ctx2.fill();
 
         // Název soustavy
-        ctx2.fillStyle='rgba(0,0,0,0.7)';
-        ctx2.font='bold 10px "Orbitron",sans-serif';
-        ctx2.textAlign='center';
+        ctx2.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx2.font = 'bold 10px "Orbitron",sans-serif';
+        ctx2.textAlign = 'center';
         ctx2.fillText(sys.name.toUpperCase(), sx, sy - Math.max(3,starR) - 7);
 
-        // Planety (malé tečky s názvy)
-        sys.planets.forEach((p, i) => {
-            const orbitR = p.distanceAU * AU * autoScale;
-            if (orbitR < 1) return; // příliš malé
+        // Stanice (malé čtverečky)
+        (sys.stations||[]).forEach(st => {
+            if (!st.currentX) return;
+            const stx = smWX(st.currentX), sty = smWY(st.currentY);
+            if (Math.abs(stx-sx)>80||Math.abs(sty-sy)>80) return; // clip
+            const isY = st.type==='shipyard';
+            ctx2.strokeStyle = isY ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.35)';
+            ctx2.lineWidth = isY ? 1.5 : 1;
+            ctx2.strokeRect(stx-2.5, sty-2.5, 5, 5);
+        });
 
-            // Orbit kruh (jen pro blízké soustavy)
-            if (orbitR > 8) {
+        // Planety (tečky + jméno)
+        sys.planets.forEach(p => {
+            const orbitR = p.distanceAU * AU * _smAutoScale;
+            if (orbitR < 2) return;
+            if (orbitR > 6) {
                 ctx2.beginPath(); ctx2.arc(sx, sy, orbitR, 0, Math.PI*2);
-                ctx2.strokeStyle='rgba(0,0,0,0.06)'; ctx2.lineWidth=1; ctx2.stroke();
+                ctx2.strokeStyle='rgba(0,0,0,0.05)'; ctx2.lineWidth=1; ctx2.stroke();
             }
-
-            // Pozice planety
             const pa = p.orbitAngle || 0;
             const px2 = sx + Math.cos(pa)*orbitR;
             const py2 = sy + Math.sin(pa)*orbitR;
-
-            // Jen pokud je orbit viditelný
-            if (orbitR < 4) return;
-
-            const pr = Math.max(2, (p.radius||12) * autoScale * 0.012);
-            ctx2.beginPath(); ctx2.arc(px2, py2, Math.max(2, pr), 0, Math.PI*2);
-            ctx2.fillStyle='#000'; ctx2.fill();
-
-            // Název planety
-            if (orbitR > 12) {
-                ctx2.fillStyle='rgba(0,0,0,0.5)';
-                ctx2.font='9px "Share Tech Mono",monospace';
-                ctx2.textAlign='center';
-                ctx2.fillText(p.name, px2, py2 - Math.max(2,pr) - 4);
+            if (orbitR < 3) return;
+            ctx2.beginPath(); ctx2.arc(px2, py2, Math.max(1.5, (p.radius||10)*_smAutoScale*0.01), 0, Math.PI*2);
+            ctx2.fillStyle = '#000'; ctx2.fill();
+            if (orbitR > 10) {
+                ctx2.fillStyle = 'rgba(0,0,0,0.45)';
+                ctx2.font = '8px "Share Tech Mono",monospace';
+                ctx2.textAlign = 'center';
+                ctx2.fillText(p.name, px2, py2 - 5);
             }
         });
     });
 
-    // Hráčova pozice (křížek)
-    const px = wx(ship.x), py = wy(ship.y);
-    ctx2.strokeStyle='#000'; ctx2.lineWidth=1.5;
-    ctx2.beginPath(); ctx2.moveTo(px-6,py); ctx2.lineTo(px+6,py); ctx2.stroke();
-    ctx2.beginPath(); ctx2.moveTo(px,py-6); ctx2.lineTo(px,py+6); ctx2.stroke();
-    ctx2.beginPath(); ctx2.arc(px,py,4,0,Math.PI*2);
-    ctx2.strokeStyle='rgba(0,0,0,0.4)'; ctx2.lineWidth=1; ctx2.stroke();
+    // ── Hráčova pozice – trojúhelník (loď) ──
+    const ppx = smWX(ship.x), ppy = smWY(ship.y);
+    ctx2.save();
+    ctx2.translate(ppx, ppy);
+    ctx2.rotate(ship.angle);
+    ctx2.beginPath();
+    ctx2.moveTo(9,0); ctx2.lineTo(-6,-5); ctx2.lineTo(-6,5);
+    ctx2.closePath();
+    ctx2.fillStyle = '#000'; ctx2.fill();
+    ctx2.restore();
 
-    // Legenda
-    ctx2.fillStyle='rgba(0,0,0,0.25)';
-    ctx2.font='9px "Share Tech Mono",monospace';
-    ctx2.textAlign='left';
-    ctx2.fillText('+ VAŠE POZICE', 12, ch-10);
-    ctx2.textAlign='right';
-    ctx2.fillText(`${allSys.length} SOUSTAV OBJEVENO`, cw-12, ch-10);
-
-    // Scroll hint
-    ctx2.fillStyle='rgba(0,0,0,0.15)';
-    ctx2.textAlign='center';
-    ctx2.fillText('SCROLL = ZOOM', cw/2, ch-10);
+    // ── Legenda ──
+    ctx2.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx2.font = '8px "Share Tech Mono",monospace';
+    ctx2.textAlign = 'left';
+    ctx2.fillText('▲ VAŠE LOĎ  |  ✕ WAYPOINT  |  KLIK = nastav cíl  |  SCROLL = zoom  |  TÁHNI = posun', 10, ch-8);
+    ctx2.textAlign = 'right';
+    ctx2.fillText(`${allSys.length} soustav`, cw-10, ch-8);
 }
 
-// Zoom + drag pro hvězdnou mapu
-function initStarMapControls() {
-    const smCanvas = document.getElementById('sm-canvas');
-    if (!smCanvas) return;
+// ── Klik na mapu – nastaví waypoint ──
+function handleStarMapClick(e) {
+    if (smDrag && (Math.abs(smDrag.dx||0)>4 || Math.abs(smDrag.dy||0)>4)) return; // byl to drag
+    const canvas = document.getElementById('sm-canvas');
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const wx = smInvX(cx);
+    const wy = smInvY(cy);
 
-    // Zoom
-    smCanvas.addEventListener('wheel', e => {
+    // Najdi nejbližší pojmenovaný objekt
+    let bestDist = Infinity, bestName = null, bestX = wx, bestY = wy;
+    const SNAP = 20 / _smAutoScale; // snap radius ve světových jednotkách
+    getAllSystems().forEach(sys => {
+        // Hvězda
+        const d = Math.sqrt((wx-sys.x)**2+(wy-sys.y)**2);
+        if (d < SNAP && d < bestDist) { bestDist=d; bestName=sys.name; bestX=sys.x; bestY=sys.y; }
+        // Stanice
+        (sys.stations||[]).forEach(st => {
+            if (!st.currentX) return;
+            const ds = Math.sqrt((wx-st.currentX)**2+(wy-st.currentY)**2);
+            if (ds < SNAP && ds < bestDist) { bestDist=ds; bestName=st.name; bestX=st.currentX; bestY=st.currentY; }
+        });
+    });
+
+    if (bestName) {
+        waypoint = { x: bestX, y: bestY, name: bestName };
+    } else {
+        waypoint = { x: wx, y: wy, name: 'Waypoint' };
+    }
+    renderStarMap();
+    updateCompass();
+}
+
+// ── Inicializace ovládání mapy ──
+function initStarMapControls() {
+    const canvas = document.getElementById('sm-canvas');
+    if (!canvas) return;
+
+    // Zoom ke kurzoru
+    canvas.addEventListener('wheel', e => {
         if (!starMapOpen) return;
         e.preventDefault();
-        const rect = smCanvas.getBoundingClientRect();
-        const mx = e.clientX - rect.left - smCanvas.width/2;
-        const my = e.clientY - rect.top - smCanvas.height/2;
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left - canvas.width/2;
+        const my = e.clientY - rect.top  - canvas.height/2;
         const factor = e.deltaY < 0 ? 1.15 : 0.87;
-        // Zoom ke kurzoru
         smOffset.x = mx + (smOffset.x - mx) * factor;
         smOffset.y = my + (smOffset.y - my) * factor;
-        smScale = Math.max(0.2, Math.min(10, smScale * factor));
+        smScale = Math.max(0.15, Math.min(12, smScale * factor));
         renderStarMap();
-    }, {passive:false});
+    }, { passive: false });
 
     // Drag
-    smCanvas.addEventListener('mousedown', e => {
+    canvas.addEventListener('mousedown', e => {
         if (!starMapOpen) return;
-        smDrag = {startX: e.clientX, startY: e.clientY, ox: smOffset.x, oy: smOffset.y};
-        smCanvas.style.cursor = 'grabbing';
+        smDrag = { startX: e.clientX, startY: e.clientY, ox: smOffset.x, oy: smOffset.y, dx: 0, dy: 0 };
+        canvas.style.cursor = 'grabbing';
     });
     window.addEventListener('mousemove', e => {
         if (!smDrag || !starMapOpen) return;
-        smOffset.x = smDrag.ox + (e.clientX - smDrag.startX);
-        smOffset.y = smDrag.oy + (e.clientY - smDrag.startY);
+        smDrag.dx = e.clientX - smDrag.startX;
+        smDrag.dy = e.clientY - smDrag.startY;
+        smOffset.x = smDrag.ox + smDrag.dx;
+        smOffset.y = smDrag.oy + smDrag.dy;
         renderStarMap();
     });
     window.addEventListener('mouseup', () => {
         smDrag = null;
-        const smCanvas = document.getElementById('sm-canvas');
-        if (smCanvas) smCanvas.style.cursor = 'grab';
+        if (canvas) canvas.style.cursor = 'crosshair';
     });
-    smCanvas.style.cursor = 'grab';
+
+    // Klik = waypoint
+    canvas.addEventListener('click', handleStarMapClick);
+    canvas.style.cursor = 'crosshair';
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     setTimeout(initStarMapControls, 400);
 });
+
+// ── Kompas ──
+function updateCompass() {
+    const el = document.getElementById('compass-widget');
+    if (!el) return;
+    if (!waypoint) { el.style.display = 'none'; return; }
+    el.style.display = 'flex';
+    const dx = waypoint.x - ship.x, dy = waypoint.y - ship.y;
+    const angle = Math.atan2(dy, dx); // světový úhel k waypointu
+    const relAngle = angle - ship.angle; // relativně k lodi (kompas)
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const distStr = dist > ILY*0.5
+        ? `${(dist/ILY).toFixed(2)} LY`
+        : dist > AU*5
+        ? `${(dist/AU).toFixed(1)} AU`
+        : `${Math.round(dist/AU*100)/100} AU`;
+    document.getElementById('compass-dist').textContent = distStr;
+    document.getElementById('compass-name').textContent = waypoint.name;
+    // Otočí šipku
+    document.getElementById('compass-arrow').style.transform = `rotate(${relAngle}rad)`;
+}
 
 // ─── INIT ────────────────────────────────────────────────────────
 async function init() {
@@ -1084,6 +1185,7 @@ function gameLoop(ts){
     lastTime=ts;
     updatePhysics(dt); draw();
     if(starMapOpen) renderStarMap();
+    updateCompass();
     requestAnimationFrame(gameLoop);
 }
 
@@ -1153,11 +1255,12 @@ function buildPlatforms(occupiedCount) {
         { id:4, label:'5', x: xs[1], y: -DOCK_H/2 + WALL_T },
         { id:5, label:'6', x: xs[2], y: -DOCK_H/2 + WALL_T },
     ];
-    // Náhodně obsaď platforms podle ostatních hráčů
-    let occ = Math.min(occupiedCount, 3);
-    const indices = [0,1,2,3].sort(()=>Math.random()-.5);
+    // Náhodně obsaď platforms podle ostatních hráčů (max 4 ze 6)
+    let occ = Math.min(occupiedCount, 4);
+    const shuffled = [0,1,2,3,4,5].sort(()=>Math.random()-.5);
+    const occupiedIds = new Set(shuffled.slice(0, occ));
     plats.forEach((p, i) => {
-        p.occupied = indices.indexOf(i) < occ;
+        p.occupied = occupiedIds.has(i);
         p.landingTimer = 0;
     });
     return plats;
