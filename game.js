@@ -458,18 +458,48 @@ function renderStarMap() {
     ctx2.fillText('SCROLL = ZOOM', cw/2, ch-10);
 }
 
-// Zoom kolečkem myši
-document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
+// Zoom + drag pro hvězdnou mapu
+function initStarMapControls() {
+    const smCanvas = document.getElementById('sm-canvas');
+    if (!smCanvas) return;
+
+    // Zoom
+    smCanvas.addEventListener('wheel', e => {
+        if (!starMapOpen) return;
+        e.preventDefault();
+        const rect = smCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left - smCanvas.width/2;
+        const my = e.clientY - rect.top - smCanvas.height/2;
+        const factor = e.deltaY < 0 ? 1.15 : 0.87;
+        // Zoom ke kurzoru
+        smOffset.x = mx + (smOffset.x - mx) * factor;
+        smOffset.y = my + (smOffset.y - my) * factor;
+        smScale = Math.max(0.2, Math.min(10, smScale * factor));
+        renderStarMap();
+    }, {passive:false});
+
+    // Drag
+    smCanvas.addEventListener('mousedown', e => {
+        if (!starMapOpen) return;
+        smDrag = {startX: e.clientX, startY: e.clientY, ox: smOffset.x, oy: smOffset.y};
+        smCanvas.style.cursor = 'grabbing';
+    });
+    window.addEventListener('mousemove', e => {
+        if (!smDrag || !starMapOpen) return;
+        smOffset.x = smDrag.ox + (e.clientX - smDrag.startX);
+        smOffset.y = smDrag.oy + (e.clientY - smDrag.startY);
+        renderStarMap();
+    });
+    window.addEventListener('mouseup', () => {
+        smDrag = null;
         const smCanvas = document.getElementById('sm-canvas');
-        if (!smCanvas) return;
-        smCanvas.addEventListener('wheel', e => {
-            if (!starMapOpen) return;
-            e.preventDefault();
-            smScale = Math.max(0.3, Math.min(8, smScale * (e.deltaY < 0 ? 1.15 : 0.87)));
-            renderStarMap();
-        }, {passive:false});
-    }, 500);
+        if (smCanvas) smCanvas.style.cursor = 'grab';
+    });
+    smCanvas.style.cursor = 'grab';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(initStarMapControls, 400);
 });
 
 // ─── INIT ────────────────────────────────────────────────────────
@@ -1043,352 +1073,471 @@ function darken(h,a){return`rgb(${Math.max(0,parseInt(h.slice(1,3),16)-a)},${Mat
 // ═══════════════════════════════════════════════════════════════
 //  DOKOVACÍ MINIHRA  –  U-hangár styl (per obrázek)
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  DOKOVACÍ MINIHRA  v3  – vstup otvorem, NPC, 4 platformy
+// ═══════════════════════════════════════════════════════════════
+// Layout:
+//   Velká černá zeď nahoře + dole s OTVOREM uprostřed (vstup)
+//   Za otvorem 4 platformy (2 nahoře, 2 dole) – loď si vybere
+//   NPC létají v dokovacím prostoru a musíš je obejít
+//   Obsazená platforma = NPC na ní sedí
+
+const DOCK_W = 900;   // šířka dokovacího prostoru
+const DOCK_H = 600;   // výška
+const WALL_T = 80;    // tloušťka zdi
+const GATE_H = 130;   // výška vstupního otvoru
+const PLAT_W = 160;   // šířka platformy
+const PLAT_H = 14;    // tloušťka platformy
+const PLAT_MARGIN = 60; // vzdálenost platformy od stěny
+
 const docking = {
-    active:false, loc:null, slots:[], chosenSlot:null,
-    sx:0, sy:0, svx:0, svy:0, sAngle:0,
-    phase:'approach', timer:0, crashMsg:'', progress:0,
-    tunnelW:68, tunnelH:110, // šířka a hloubka U-hangáru
+    active: false,
+    loc: null,
+    phase: 'approach', // 'approach' | 'inside' | 'landing' | 'success' | 'fail'
+    timer: 0,
+    crashMsg: '',
+
+    // Loď v dokovacím prostoru (lokální souřadnice, střed = 0,0)
+    sx: 0, sy: 0, svx: 0, svy: 0, sAngle: 0,
+
+    // Platformy [{ id, x, y, occupied, landingTimer }]
+    platforms: [],
+
+    // NPC lodě [{ x, y, vx, vy, angle, timer }]
+    npcs: [],
+    npcSpawnTimer: 0,
+
+    // Vybraná platforma (hover)
+    hoveredPlat: null,
+    landedPlat: null,
 };
 
 const dcv = document.getElementById('dock-canvas');
 const dcc = dcv ? dcv.getContext('2d') : null;
 let dLastTime = null;
 
+// ── Pomocné – platformy layout ────────────────────────────────
+function buildPlatforms(occupiedCount) {
+    // 4 platformy: 2 nahoře (čísla 3,4), 2 dole (čísla 1,2)
+    // x relativně ke středu prostoru, y od středu
+    const halfW = DOCK_W / 2;
+    const plats = [
+        { id:0, label:'1', x: -halfW + PLAT_MARGIN + PLAT_W/2,  y:  DOCK_H/2 - WALL_T - PLAT_H },
+        { id:1, label:'2', x:  halfW - PLAT_MARGIN - PLAT_W/2,  y:  DOCK_H/2 - WALL_T - PLAT_H },
+        { id:2, label:'3', x: -halfW + PLAT_MARGIN + PLAT_W/2,  y: -DOCK_H/2 + WALL_T },
+        { id:3, label:'4', x:  halfW - PLAT_MARGIN - PLAT_W/2,  y: -DOCK_H/2 + WALL_T },
+    ];
+    // Náhodně obsaď platforms podle ostatních hráčů
+    let occ = Math.min(occupiedCount, 3);
+    const indices = [0,1,2,3].sort(()=>Math.random()-.5);
+    plats.forEach((p, i) => {
+        p.occupied = indices.indexOf(i) < occ;
+        p.landingTimer = 0;
+    });
+    return plats;
+}
+
+// ── Start ─────────────────────────────────────────────────────
 function startDockingMinigame(loc) {
-    // Zjisti obsazenost – slot je obsazen pokud tam je jiný hráč
-    const slots=[];
-    for(let i=0;i<4;i++){
-        const baseAngle=(Math.PI*2/4)*i;
-        const occupied=otherPlayers.some(p=>{
-            const dx=p.x-loc.currentX, dy=p.y-loc.currentY;
-            const a=Math.atan2(dy,dx);
-            const diff=Math.abs(((a-baseAngle)+Math.PI*3)%(Math.PI*2)-Math.PI);
-            return diff<0.4&&Math.sqrt(dx*dx+dy*dy)<(loc.radius||40)+100;
-        });
-        slots.push({angle:baseAngle,occupied,id:i});
-    }
-    const freeSlot=slots.find(s=>!s.occupied);
-    if(!freeSlot){ showFullMsg(loc); return; }
+    const occupiedCount = otherPlayers.filter(p => {
+        const dx = p.x - loc.currentX, dy = p.y - loc.currentY;
+        return Math.sqrt(dx*dx+dy*dy) < 200;
+    }).length;
 
-    docking.active=true; docking.loc=loc; docking.slots=slots;
-    docking.chosenSlot=freeSlot; docking.phase='approach';
-    docking.timer=0; docking.crashMsg=''; docking.progress=0;
+    docking.active = true;
+    docking.loc = loc;
+    docking.phase = 'approach';
+    docking.timer = 0;
+    docking.crashMsg = '';
+    docking.hoveredPlat = null;
+    docking.landedPlat = null;
+    docking.platforms = buildPlatforms(occupiedCount);
+    docking.npcs = [];
+    docking.npcSpawnTimer = 2.0;
 
-    // Vstupní pozice – loď přiletí z vnější strany slotu
-    const bodyR=(loc.radius||30)+20;
-    const slotA=freeSlot.angle;
-    const entryDist=bodyR+docking.tunnelH+100;
-    docking.sx=Math.cos(slotA)*entryDist;
-    docking.sy=Math.sin(slotA)*entryDist;
-    docking.svx=0; docking.svy=0;
-    docking.sAngle=slotA+Math.PI; // míří k planetě
+    // Loď začíná vlevo od otvoru, uprostřed výšky
+    docking.sx = -DOCK_W/2 - 120;
+    docking.sy = 0;
+    docking.svx = 0;
+    docking.svy = 0;
+    docking.sAngle = 0; // míří doprava
 
-    activePanel='docking';
-    dcv.style.display='block';
-    document.getElementById('dock-hint').style.display='block';
+    activePanel = 'docking';
+    dcv.style.display = 'block';
+    document.getElementById('dock-hint').style.display = 'block';
+    dLastTime = null;
     requestAnimationFrame(dockingLoop);
 }
 
-function showFullMsg(loc){
-    const el=document.getElementById('dock-full-msg');
-    el.textContent=`${loc.name}: všechna dokovací místa obsazena.`;
-    el.style.display='block';
-    setTimeout(()=>{ el.style.display='none'; },3000);
+function showFullMsg(loc) {
+    const el = document.getElementById('dock-full-msg');
+    el.textContent = `${loc.name}: všechna místa obsazena.`;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
 }
 
-function dockingLoop(ts){
-    if(!docking.active)return;
-    if(!dLastTime)dLastTime=ts;
-    const dt=Math.min((ts-dLastTime)/1000,0.05);
-    dLastTime=ts;
+// ── Loop ─────────────────────────────────────────────────────
+function dockingLoop(ts) {
+    if (!docking.active) return;
+    if (!dLastTime) dLastTime = ts;
+    const dt = Math.min((ts - dLastTime) / 1000, 0.05);
+    dLastTime = ts;
 
-    if(docking.phase==='success'||docking.phase==='fail'){
-        docking.timer-=dt;
-        if(docking.timer<=0){
-            if(docking.phase==='success'){
-                docking.active=false;
-                dcv.style.display='none';
-                document.getElementById('dock-hint').style.display='none';
-                dLastTime=null; activePanel=null;
-                dockedAt=docking.loc.id;
+    if (docking.phase === 'success' || docking.phase === 'fail') {
+        docking.timer -= dt;
+        if (docking.timer <= 0) {
+            if (docking.phase === 'success') {
+                docking.active = false;
+                dcv.style.display = 'none';
+                document.getElementById('dock-hint').style.display = 'none';
+                dLastTime = null; activePanel = null;
+                dockedAt = docking.loc.id;
                 openDock(docking.loc);
             } else {
-                docking.active=false; activePanel=null;
-                dcv.style.display='none';
-                document.getElementById('dock-hint').style.display='none';
-                dLastTime=null;
+                docking.active = false; activePanel = null;
+                dcv.style.display = 'none';
+                document.getElementById('dock-hint').style.display = 'none';
+                dLastTime = null;
             }
         }
         drawDockingScene();
         requestAnimationFrame(dockingLoop);
         return;
     }
-    updateDockingPhysics(dt);
-    checkDockingCollision();
+
+    updateDockPhysics(dt);
+    updateNPCs(dt);
+    checkDockCollisions();
     drawDockingScene();
     requestAnimationFrame(dockingLoop);
 }
 
-function updateDockingPhysics(dt){
-    const ROT=2.5, THRUST=260, BRAKE=0.97;
-    if(keys['KeyA']||keys['ArrowLeft'])  docking.sAngle-=ROT*dt;
-    if(keys['KeyD']||keys['ArrowRight']) docking.sAngle+=ROT*dt;
-    if(keys['KeyW']||keys['ArrowUp']){
-        docking.svx+=Math.cos(docking.sAngle)*THRUST*dt;
-        docking.svy+=Math.sin(docking.sAngle)*THRUST*dt;
+// ── Fyzika lodi ───────────────────────────────────────────────
+function updateDockPhysics(dt) {
+    const ROT = 2.8, THRUST = 280, BRAKE = 0.97;
+    if (keys['KeyA'] || keys['ArrowLeft'])  docking.sAngle -= ROT * dt;
+    if (keys['KeyD'] || keys['ArrowRight']) docking.sAngle += ROT * dt;
+    const thrusting = keys['KeyW'] || keys['ArrowUp'];
+    if (thrusting) {
+        docking.svx += Math.cos(docking.sAngle) * THRUST * dt;
+        docking.svy += Math.sin(docking.sAngle) * THRUST * dt;
     }
-    if(keys['KeyS']||keys['ArrowDown']){ docking.svx*=BRAKE; docking.svy*=BRAKE; }
-    docking.sx+=docking.svx*dt; docking.sy+=docking.svy*dt;
+    if (keys['KeyS'] || keys['ArrowDown']) {
+        docking.svx *= BRAKE;
+        docking.svy *= BRAKE;
+    }
+    docking.sx += docking.svx * dt;
+    docking.sy += docking.svy * dt;
 }
 
-function checkDockingCollision(){
-    const slot=docking.chosenSlot;
-    const loc=docking.loc;
-    const bodyR=(loc.radius||30)+20;
-    const sa=slot.angle;
-
-    // Střed vstupu do hangáru (na povrchu planety/stanice)
-    const hangW=docking.tunnelW/2;
-    const hangDepth=docking.tunnelH;
-
-    // Osa tunelu: od povrchu směrem ven
-    const axisX=Math.cos(sa), axisY=Math.sin(sa);
-    const perpX=-axisY, perpY=axisX;
-
-    // Střed vstupu hangáru
-    const entryX=axisX*bodyR, entryY=axisY*bodyR;
-
-    // Vektor od vstupu k lodi
-    const rx=docking.sx-entryX, ry=docking.sy-entryY;
-    const along=rx*axisX+ry*axisY; // kladné = ven, záporné = dovnitř
-    const perp=rx*perpX+ry*perpY;
-
-    // Jsme v oblasti hangáru? (along od -hangDepth do +50, perp od -hangW do +hangW)
-    const inHangWidth=Math.abs(perp)<hangW;
-    const inHangDepth=along>-hangDepth && along<50;
-
-    if(inHangWidth && inHangDepth){
-        docking.phase='tunnel';
-        docking.progress=Math.max(0,Math.min(1,(-along)/hangDepth));
-        // Náraz do stěny hangáru
-        if(Math.abs(perp)>hangW-8){
-            triggerCrash(); return;
-        }
-        // Dosažení dna hangáru
-        if(along<-hangDepth+15){
-            const spd=Math.sqrt(docking.svx**2+docking.svy**2);
-            if(spd>160) triggerCrash();
-            else triggerSuccess();
-        }
-    } else {
-        if(docking.phase==='tunnel') docking.phase='approach';
-    }
-
-    // Náraz do těla planety
-    const distC=Math.sqrt(docking.sx**2+docking.sy**2);
-    if(distC<bodyR-8){ triggerCrash(); }
-}
-
-function triggerCrash(){
-    if(docking.phase==='fail')return;
-    docking.phase='fail'; docking.timer=2.2;
-    const cargoIds=Object.keys(player.cargo);
-    if(cargoIds.length>0){
-        let lost=0;
-        cargoIds.forEach(id=>{
-            const dmg=Math.ceil((player.cargo[id]||0)*0.25);
-            player.cargo[id]=(player.cargo[id]||0)-dmg; lost+=dmg;
-            if(player.cargo[id]<=0)delete player.cargo[id];
-        });
-        docking.crashMsg=`NÁRAZ! Ztraceno ${lost}t nákladu.`;
-    } else {
-        docking.crashMsg='NÁRAZ! -500 Cr (oprava)';
-        player.money=Math.max(0,player.money-500);
-    }
-    docking.svx=-docking.svx*0.4; docking.svy=-docking.svy*0.4;
-}
-
-function triggerSuccess(){
-    if(docking.phase==='success')return;
-    docking.phase='success'; docking.timer=0.9;
-}
-
-// ─── KRESLENÍ DOKOVACÍ MINIHRY ───────────────────────────────────
-function drawDockingScene(){
-    const cw=dcv.width, ch=dcv.height;
-    const cx=cw/2, cy=ch/2;
-    const dctx=dcc;
-
-    dctx.fillStyle='#fff'; dctx.fillRect(0,0,cw,ch);
-
-    // Jemné pozadí tečky
-    dctx.fillStyle='rgba(0,0,0,0.04)';
-    for(let i=0;i<80;i++){
-        const bx=Math.sin(i*137.5)*600, by=Math.cos(i*137.5)*600;
-        dctx.beginPath(); dctx.arc(cx+bx,cy+by,1,0,Math.PI*2); dctx.fill();
-    }
-
-    dctx.save();
-    dctx.translate(cx,cy);
-
-    const loc=docking.loc;
-    const bodyR=(loc.radius||30)+20;
-    const slot=docking.chosenSlot;
-
-    // ── Tělo planety ──
-    const pg=dctx.createRadialGradient(-bodyR*.2,-bodyR*.2,0,0,0,bodyR);
-    pg.addColorStop(0,'#444'); pg.addColorStop(1,'#000');
-    dctx.beginPath(); dctx.arc(0,0,bodyR,0,Math.PI*2); dctx.fillStyle=pg; dctx.fill();
-
-    // ── 4 hangáry (U-tvary) ──
-    docking.slots.forEach(s=>{
-        drawHangar(dctx, s, bodyR, s.id===slot.id);
+// ── NPC lodě ─────────────────────────────────────────────────
+function spawnNPC() {
+    // Generuj NPC na vstupním otvoru nebo uvnitř
+    const fromLeft = Math.random() < 0.5;
+    const x = fromLeft ? -DOCK_W/2 + 10 : DOCK_W/2 - 10;
+    const y = (Math.random() - 0.5) * (GATE_H - 30);
+    const spd = 60 + Math.random() * 80;
+    const angle = fromLeft ? 0 : Math.PI;
+    docking.npcs.push({
+        x, y,
+        vx: Math.cos(angle) * spd,
+        vy: (Math.random() - 0.5) * 40,
+        angle,
+        life: 6.0,
     });
+}
 
-    // ── Loď hráče ──
-    const shake = (docking.phase==='fail') ? {x:(Math.random()-.5)*5,y:(Math.random()-.5)*5} : {x:0,y:0};
+function updateNPCs(dt) {
+    docking.npcSpawnTimer -= dt;
+    if (docking.npcSpawnTimer <= 0 && docking.phase === 'inside') {
+        spawnNPC();
+        docking.npcSpawnTimer = 1.5 + Math.random() * 2.0;
+    }
+    docking.npcs = docking.npcs.filter(n => {
+        n.x += n.vx * dt;
+        n.y += n.vy * dt;
+        n.life -= dt;
+        // Odraz od stěn
+        const innerH = DOCK_H/2 - WALL_T;
+        if (Math.abs(n.y) > innerH - 10) { n.vy *= -1; n.y = Math.sign(n.y) * (innerH - 10); }
+        if (Math.abs(n.x) > DOCK_W/2 - 10) { n.vx *= -1; }
+        return n.life > 0;
+    });
+}
+
+// ── Kolize ───────────────────────────────────────────────────
+function checkDockCollisions() {
+    const sx = docking.sx, sy = docking.sy;
+    const halfW = DOCK_W / 2;
+    const innerH = DOCK_H/2 - WALL_T; // vnitřní výška bez zdí
+
+    // Vstupní otvor – je loď v oblasti otvoru nebo uvnitř?
+    const inGate  = sx > -halfW - 20 && sx < -halfW + 60 && Math.abs(sy) < GATE_H/2;
+    const inside  = sx > -halfW + 60;
+    const outsideRight = sx > halfW - 20;
+
+    if (inside || inGate) docking.phase = 'inside';
+
+    // Náraz do horní/dolní zdi
+    if (inside && Math.abs(sy) > innerH) {
+        triggerDockCrash('NÁRAZ DO ZDI!'); return;
+    }
+
+    // Náraz do boční zdi (vpravo)
+    if (inside && sx > halfW - 15) {
+        triggerDockCrash('NÁRAZ DO ZDI!'); return;
+    }
+
+    // Náraz do zdi u vstupu (levá stěna vedle otvoru)
+    if (sx > -halfW - 15 && sx < -halfW + 20 && Math.abs(sy) > GATE_H/2) {
+        triggerDockCrash('NÁRAZ DO STĚNY VSTUPU!'); return;
+    }
+
+    // Náraz do NPC
+    for (const n of docking.npcs) {
+        const dx = sx - n.x, dy = sy - n.y;
+        if (Math.sqrt(dx*dx+dy*dy) < 22) {
+            triggerDockCrash('SRÁŽKA S NPC!'); return;
+        }
+    }
+
+    // Platformy – přistání
+    if (inside) {
+        docking.hoveredPlat = null;
+        for (const p of docking.platforms) {
+            const px = p.x, py = p.y;
+            const isBottom = py > 0; // dolní platformy
+            const landY = isBottom ? py - 20 : py + PLAT_H + 20;
+            const abovePlat = isBottom
+                ? sy > py - 35 && sy < py - 5
+                : sy < py + PLAT_H + 35 && sy > py + PLAT_H + 5;
+            const overPlat = Math.abs(sx - px) < PLAT_W/2 + 5;
+
+            if (overPlat && abovePlat) {
+                if (p.occupied) {
+                    // Jemné varování
+                    docking.hoveredPlat = { ...p, blocked: true };
+                } else {
+                    docking.hoveredPlat = p;
+                    // Přistání – musí mít malou rychlost
+                    const spd = Math.sqrt(docking.svx**2 + docking.svy**2);
+                    if (spd < 60) {
+                        p.landingTimer = (p.landingTimer || 0) + 0.016;
+                        if (p.landingTimer > 0.6) {
+                            triggerDockSuccess(p);
+                        }
+                    } else {
+                        p.landingTimer = 0;
+                    }
+                }
+            } else {
+                p.landingTimer = 0;
+            }
+        }
+    }
+}
+
+function triggerDockCrash(msg) {
+    if (docking.phase === 'fail') return;
+    docking.phase = 'fail';
+    docking.timer = 2.5;
+    docking.crashMsg = msg;
+    // Ztráta nákladu
+    const cargoIds = Object.keys(player.cargo);
+    if (cargoIds.length > 0) {
+        let lost = 0;
+        cargoIds.forEach(id => {
+            const dmg = Math.ceil((player.cargo[id]||0) * 0.25);
+            player.cargo[id] = (player.cargo[id]||0) - dmg; lost += dmg;
+            if (player.cargo[id] <= 0) delete player.cargo[id];
+        });
+        docking.crashMsg += ` -${lost}t nákladu`;
+    } else {
+        player.money = Math.max(0, player.money - 300);
+        docking.crashMsg += ' -300 Cr';
+    }
+    docking.svx *= -0.3; docking.svy *= -0.3;
+}
+
+function triggerDockSuccess(plat) {
+    if (docking.phase === 'success') return;
+    docking.phase = 'success';
+    docking.timer = 0.8;
+    docking.landedPlat = plat;
+    plat.occupied = true;
+}
+
+// ── Kreslení ─────────────────────────────────────────────────
+function drawDockingScene() {
+    const cw = dcv.width, ch = dcv.height;
+    const cx = cw/2, cy = ch/2;
+    const dctx = dcc;
+
+    dctx.fillStyle = '#fff';
+    dctx.fillRect(0, 0, cw, ch);
+
     dctx.save();
-    dctx.translate(docking.sx+shake.x, docking.sy+shake.y);
-    dctx.rotate(docking.sAngle);
-    SHIP_TYPES[player.shipType].draw(dctx, keys['KeyW']||keys['ArrowUp']);
+    dctx.translate(cx, cy);
+
+    const shake = docking.phase === 'fail'
+        ? { x:(Math.random()-.5)*6, y:(Math.random()-.5)*6 }
+        : { x:0, y:0 };
+    dctx.translate(shake.x, shake.y);
+
+    drawDockWalls(dctx);
+    drawDockPlatforms(dctx);
+    drawDockNPCs(dctx);
+    drawDockShip(dctx);
+    drawDockHUD(dctx, cw, ch);
+
     dctx.restore();
+}
 
-    // ── Rychlost ──
-    const spd=Math.sqrt(docking.svx**2+docking.svy**2);
-    const tooFast=spd>160;
-    dctx.fillStyle=tooFast?'rgba(180,0,0,0.85)':'rgba(0,0,0,0.45)';
-    dctx.font='12px "Share Tech Mono",monospace'; dctx.textAlign='left';
-    dctx.fillText(`SPD: ${Math.round(spd)} ${tooFast?'⚠ ZPOMAL':spd<30?'✓ POMALU':''}`, -cx+18, -cy+28);
+function drawDockWalls(dctx) {
+    const halfW = DOCK_W/2, halfH = DOCK_H/2;
+    dctx.fillStyle = '#000';
 
-    // ── Progress bar (hloubka v hangáru) ──
-    if(docking.phase==='tunnel'){
-        const bw=160, bh=7, bx=-bw/2, by=cy-40;
-        dctx.fillStyle='rgba(0,0,0,0.1)'; dctx.fillRect(bx,by,bw,bh);
-        dctx.fillStyle='rgba(0,0,0,0.7)'; dctx.fillRect(bx,by,bw*docking.progress,bh);
-        dctx.fillStyle='rgba(0,0,0,0.4)'; dctx.font='9px "Share Tech Mono",monospace'; dctx.textAlign='center';
-        dctx.fillText('HLOUBKA HANGÁRU',0,by-4);
-    }
+    // ── Horní zeď (celá) ──
+    dctx.fillRect(-halfW, -halfH, DOCK_W, WALL_T);
 
-    // ── Zprávy ──
-    if(docking.phase==='success'){
-        dctx.fillStyle='rgba(0,0,0,0.9)'; dctx.font='bold 22px "Orbitron",sans-serif'; dctx.textAlign='center';
-        dctx.fillText('✓ DOKOVÁNÍ ÚSPĚŠNÉ',0,-20);
-    }
-    if(docking.phase==='fail'){
-        dctx.fillStyle='rgba(160,0,0,0.9)'; dctx.font='bold 18px "Orbitron",sans-serif'; dctx.textAlign='center';
-        dctx.fillText(docking.crashMsg,0,-20);
-    }
+    // ── Dolní zeď (celá) ──
+    dctx.fillRect(-halfW, halfH - WALL_T, DOCK_W, WALL_T);
+
+    // ── Levá stěna s otvorem uprostřed ──
+    const gateTop = -GATE_H/2;
+    const gateBot = GATE_H/2;
+    // Část levé stěny nad otvorem
+    dctx.fillRect(-halfW, -halfH + WALL_T, WALL_T, (gateTop) - (-halfH + WALL_T));
+    // Část levé stěny pod otvorem
+    dctx.fillRect(-halfW, gateBot, WALL_T, halfH - WALL_T - gateBot);
+
+    // ── Pravá zeď ──
+    dctx.fillRect(halfW - WALL_T, -halfH + WALL_T, WALL_T, halfH*2 - WALL_T*2);
+
+    // ── Šipka u vstupu ──
+    dctx.fillStyle = 'rgba(0,0,0,0.15)';
+    dctx.font = '28px monospace';
+    dctx.textAlign = 'center';
+    dctx.textBaseline = 'middle';
+    dctx.fillText('→', -halfW - 55, 0);
+    dctx.textBaseline = 'alphabetic';
+}
+
+function drawDockPlatforms(dctx) {
+    docking.platforms.forEach(p => {
+        const isHovered = docking.hoveredPlat && docking.hoveredPlat.id === p.id;
+        const isBottom = p.y > 0;
+
+        // Platforma – obdélník
+        dctx.fillStyle = p.occupied ? 'rgba(0,0,0,0.35)' : (isHovered ? '#000' : 'rgba(0,0,0,0.75)');
+        dctx.fillRect(p.x - PLAT_W/2, p.y, PLAT_W, PLAT_H);
+
+        // Nožičky platformy
+        dctx.fillStyle = 'rgba(0,0,0,0.5)';
+        const legH = 20;
+        if (isBottom) {
+            // Platforma při dolní zdi – nožičky dolů
+            dctx.fillRect(p.x - PLAT_W/2 + 10, p.y + PLAT_H, 8, legH);
+            dctx.fillRect(p.x + PLAT_W/2 - 18, p.y + PLAT_H, 8, legH);
+        } else {
+            // Platforma při horní zdi – nožičky nahoru
+            dctx.fillRect(p.x - PLAT_W/2 + 10, p.y - legH, 8, legH);
+            dctx.fillRect(p.x + PLAT_W/2 - 18, p.y - legH, 8, legH);
+        }
+
+        // Číslo platformy
+        dctx.fillStyle = p.occupied ? 'rgba(255,255,255,0.5)' : '#fff';
+        dctx.font = 'bold 18px "Orbitron",sans-serif';
+        dctx.textAlign = 'center';
+        const labelY = isBottom ? p.y - 12 : p.y + PLAT_H + 22;
+        dctx.fillText(p.label, p.x, labelY);
+
+        // Obsazeno – X
+        if (p.occupied) {
+            dctx.fillStyle = 'rgba(200,0,0,0.7)';
+            dctx.font = '12px "Share Tech Mono",monospace';
+            dctx.fillText('OBSAZENO', p.x, labelY + (isBottom ? -16 : 16));
+        }
+
+        // Progress přistání
+        if (isHovered && !p.occupied && p.landingTimer > 0) {
+            const pct = p.landingTimer / 0.6;
+            dctx.fillStyle = 'rgba(0,0,0,0.2)';
+            dctx.fillRect(p.x - PLAT_W/2, p.y - (isBottom ? 8 : -PLAT_H - 8), PLAT_W, 5);
+            dctx.fillStyle = '#000';
+            dctx.fillRect(p.x - PLAT_W/2, p.y - (isBottom ? 8 : -PLAT_H - 8), PLAT_W * pct, 5);
+        }
+    });
+}
+
+function drawDockNPCs(dctx) {
+    docking.npcs.forEach(n => {
+        dctx.save();
+        dctx.translate(n.x, n.y);
+        dctx.rotate(n.angle);
+        // Jednoduchá NPC loď – malý trojúhelník
+        dctx.beginPath();
+        dctx.moveTo(12, 0); dctx.lineTo(-8, -5); dctx.lineTo(-8, 5);
+        dctx.closePath();
+        dctx.fillStyle = 'rgba(0,0,0,0.4)';
+        dctx.strokeStyle = '#000';
+        dctx.lineWidth = 1;
+        dctx.fill(); dctx.stroke();
+        dctx.restore();
+    });
+}
+
+function drawDockShip(dctx) {
+    dctx.save();
+    dctx.translate(docking.sx, docking.sy);
+    dctx.rotate(docking.sAngle);
+    SHIP_TYPES[player.shipType].draw(dctx, keys['KeyW'] || keys['ArrowUp']);
+    dctx.restore();
+}
+
+function drawDockHUD(dctx, cw, ch) {
+    const halfW = DOCK_W/2, halfH = DOCK_H/2;
+    const spd = Math.sqrt(docking.svx**2 + docking.svy**2);
+    const tooFast = spd > 60 && docking.hoveredPlat && !docking.hoveredPlat.blocked;
+
+    // Rychlost
+    dctx.fillStyle = tooFast ? 'rgba(180,0,0,0.9)' : 'rgba(0,0,0,0.5)';
+    dctx.font = '12px "Share Tech Mono",monospace';
+    dctx.textAlign = 'left';
+    dctx.fillText(`SPD: ${Math.round(spd)} ${tooFast ? '⚠ ZPOMAL' : ''}`, -halfW + 6, -halfH + 20);
 
     // Název lokace
-    dctx.fillStyle='rgba(0,0,0,0.25)'; dctx.font='10px "Share Tech Mono",monospace'; dctx.textAlign='right';
-    dctx.fillText(loc.name.toUpperCase(), cx-16, -cy+22);
-
-    dctx.restore();
+    dctx.fillStyle = 'rgba(0,0,0,0.25)';
+    dctx.font = '10px "Share Tech Mono",monospace';
+    dctx.textAlign = 'right';
+    dctx.fillText(docking.loc?.name?.toUpperCase() || '', halfW - 6, -halfH + 18);
 
     // Slot indikátor
-    drawSlotIndicator(dctx,cw,ch);
-}
-
-function drawHangar(dctx, slot, bodyR, isActive){
-    const sa=slot.angle;
-    const axisX=Math.cos(sa), axisY=Math.sin(sa);
-    const perpX=-axisY, perpY=axisX;
-    const hw=docking.tunnelW/2;
-    const depth=docking.tunnelH;
-    const wallT=8; // tloušťka stěn hangáru
-
-    // Střed vstupu na povrchu planety
-    const ex=axisX*bodyR, ey=axisY*bodyR;
-
-    // Bod na vnějším okraji planety (vstup)
-    const L1x=ex-perpX*hw, L1y=ey-perpY*hw; // levá strana vstupu
-    const R1x=ex+perpX*hw, R1y=ey+perpY*hw; // pravá strana vstupu
-
-    // Dno hangáru (dovnitř planety)
-    const L2x=L1x-axisX*depth, L2y=L1y-axisY*depth;
-    const R2x=R1x-axisX*depth, R2y=R1y-axisY*depth;
-
-    if(slot.occupied){
-        // Obsazený – vyšrafovaný hangár
-        dctx.strokeStyle='rgba(160,0,0,0.5)'; dctx.lineWidth=2.5;
-        // Levá stěna
-        dctx.beginPath(); dctx.moveTo(L1x,L1y); dctx.lineTo(L2x,L2y); dctx.stroke();
-        // Pravá stěna
-        dctx.beginPath(); dctx.moveTo(R1x,R1y); dctx.lineTo(R2x,R2y); dctx.stroke();
-        // Dno
-        dctx.beginPath(); dctx.moveTo(L2x,L2y); dctx.lineTo(R2x,R2y); dctx.stroke();
-        // X přes vstup
-        dctx.strokeStyle='rgba(200,0,0,0.7)'; dctx.lineWidth=3;
-        dctx.beginPath(); dctx.moveTo(L1x,L1y); dctx.lineTo(R1x,R1y); dctx.stroke();
-        dctx.beginPath(); dctx.moveTo(L1x-perpX*2,L1y-perpY*2); dctx.lineTo(R1x+perpX*2,R1y+perpY*2); dctx.stroke();
-        return;
-    }
-
-    // Volný / aktivní hangár
-    const alpha = isActive ? 1 : 0.25;
-    dctx.globalAlpha = alpha;
-
-    // Stěny (tučné čáry – U tvar)
-    dctx.strokeStyle='#000'; dctx.lineWidth=wallT;
-    dctx.lineCap='square';
-
-    // Levá stěna
-    dctx.beginPath();
-    dctx.moveTo(L1x-perpX*(wallT/2), L1y-perpY*(wallT/2));
-    dctx.lineTo(L2x-perpX*(wallT/2), L2y-perpY*(wallT/2));
-    dctx.stroke();
-
-    // Pravá stěna
-    dctx.beginPath();
-    dctx.moveTo(R1x+perpX*(wallT/2), R1y+perpY*(wallT/2));
-    dctx.lineTo(R2x+perpX*(wallT/2), R2y+perpY*(wallT/2));
-    dctx.stroke();
-
-    // Dno hangáru
-    dctx.beginPath();
-    dctx.moveTo(L2x-perpX*(wallT/2), L2y-perpY*(wallT/2));
-    dctx.lineTo(R2x+perpX*(wallT/2), R2y+perpY*(wallT/2));
-    dctx.stroke();
-
-    // Vodící čára (osa, přerušovaná)
-    if(isActive){
-        dctx.setLineDash([6,8]);
-        dctx.strokeStyle='rgba(0,0,0,0.15)'; dctx.lineWidth=1;
-        dctx.beginPath(); dctx.moveTo(ex,ey); dctx.lineTo(L2x+(R2x-L2x)/2,L2y+(R2y-L2y)/2);
-        dctx.stroke(); dctx.setLineDash([]);
-
-        // Cílová čára na dně
-        dctx.strokeStyle='rgba(0,0,0,0.4)'; dctx.lineWidth=2;
-        dctx.beginPath(); dctx.moveTo(L2x,L2y); dctx.lineTo(R2x,R2y); dctx.stroke();
-
-        // Šipka vstupu
-        dctx.fillStyle='rgba(0,0,0,0.2)';
-        dctx.beginPath();
-        dctx.moveTo(ex+axisX*20, ey+axisY*20);
-        dctx.lineTo(ex+axisX*20+perpX*10, ey+axisY*20+perpY*10);
-        dctx.lineTo(ex+axisX*35, ey+axisY*35);
-        dctx.lineTo(ex+axisX*20-perpX*10, ey+axisY*20-perpY*10);
-        dctx.closePath(); dctx.fill();
-    }
-
-    dctx.globalAlpha=1;
-    dctx.lineCap='butt';
-}
-
-function drawSlotIndicator(dctx,cw,ch){
-    const sx=18, sy=ch-58;
-    dctx.fillStyle='rgba(0,0,0,0.35)'; dctx.font='9px "Share Tech Mono",monospace'; dctx.textAlign='left';
-    dctx.fillText('HANGÁRY',sx,sy-5);
-    docking.slots.forEach((s,i)=>{
-        const bx=sx+i*26, by=sy;
-        dctx.strokeStyle='rgba(0,0,0,0.5)'; dctx.lineWidth=1;
-        dctx.fillStyle=s.occupied?'rgba(180,0,0,0.2)':(s.id===docking.chosenSlot?.id?'rgba(0,0,0,0.12)':'rgba(0,0,0,0.04)');
-        dctx.fillRect(bx,by,20,20); dctx.strokeRect(bx,by,20,20);
-        dctx.fillStyle='rgba(0,0,0,0.6)'; dctx.font='10px monospace'; dctx.textAlign='center';
-        if(s.occupied) dctx.fillText('✕',bx+10,by+14);
-        else if(s.id===docking.chosenSlot?.id) dctx.fillText('▼',bx+10,by+14);
-        else dctx.fillText('○',bx+10,by+14);
+    docking.platforms.forEach((p, i) => {
+        const bx = -halfW + 10 + i*26;
+        const by = halfH - 30;
+        dctx.strokeStyle = 'rgba(0,0,0,0.5)'; dctx.lineWidth = 1;
+        dctx.fillStyle = p.occupied ? 'rgba(180,0,0,0.2)' :
+                        (docking.hoveredPlat?.id===p.id ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.04)');
+        dctx.fillRect(bx, by, 20, 20); dctx.strokeRect(bx, by, 20, 20);
+        dctx.fillStyle = 'rgba(0,0,0,0.7)';
+        dctx.font = '10px monospace'; dctx.textAlign = 'center';
+        dctx.fillText(p.occupied ? '✕' : p.label, bx+10, by+14);
     });
+
+    // Zprávy
+    if (docking.phase === 'success') {
+        dctx.fillStyle = 'rgba(0,0,0,0.9)';
+        dctx.font = 'bold 24px "Orbitron",sans-serif';
+        dctx.textAlign = 'center';
+        dctx.fillText('✓ PŘISTÁNÍ ÚSPĚŠNÉ', 0, -20);
+    }
+    if (docking.phase === 'fail') {
+        dctx.fillStyle = 'rgba(160,0,0,0.9)';
+        dctx.font = 'bold 18px "Orbitron",sans-serif';
+        dctx.textAlign = 'center';
+        dctx.fillText(docking.crashMsg, 0, -20);
+    }
 }
 
 init();
