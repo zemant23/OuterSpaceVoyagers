@@ -569,12 +569,25 @@ function initStarMapControls() {
         if (!starMapOpen) return;
         e.preventDefault();
         const rect = canvas.getBoundingClientRect();
-        const mx = e.clientX - rect.left - canvas.width/2;
-        const my = e.clientY - rect.top  - canvas.height/2;
+        // Pozice kurzoru v canvas souřadnicích
+        const mouseCanvasX = e.clientX - rect.left;
+        const mouseCanvasY = e.clientY - rect.top;
+        // Světová souřadnice pod kurzorem PŘED zoomem
+        const worldX = smInvX(mouseCanvasX);
+        const worldY = smInvY(mouseCanvasY);
+        // Změna scale
         const factor = e.deltaY < 0 ? 1.15 : 0.87;
-        smOffset.x = mx + (smOffset.x - mx) * factor;
-        smOffset.y = my + (smOffset.y - my) * factor;
         smScale = Math.max(0.15, Math.min(12, smScale * factor));
+        // Po změně scale zajisti že světová souřadnice zůstane pod kurzorem
+        // smWX(worldX) musí = mouseCanvasX
+        // _smCX + (worldX - _smMapCX) * newAutoScale = mouseCanvasX
+        // Ale _smCX = cw/2 + smOffset.x, takže:
+        // smOffset.x = mouseCanvasX - canvas.width/2 - (worldX - _smMapCX) * nový_autoScale
+        // Protože nový autoScale závisí na smScale, renderujeme nejdřív aby se přepočítal
+        renderStarMap();
+        // Teď _smAutoScale a _smMapCX jsou aktuální – dopočítej offset
+        smOffset.x = mouseCanvasX - canvas.width/2  - (worldX - _smMapCX) * _smAutoScale;
+        smOffset.y = mouseCanvasY - canvas.height/2 - (worldY - _smMapCY) * _smAutoScale;
         renderStarMap();
     }, { passive: false });
 
