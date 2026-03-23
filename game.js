@@ -471,15 +471,29 @@ function renderStarMap() {
         ctx2.textAlign = 'center';
         ctx2.fillText(sys.name.toUpperCase(), sx, sy - Math.max(3,starR) - 7);
 
-        // Stanice (malé čtverečky)
+        // Stanice (čtverečky + název při přiblížení)
         (sys.stations||[]).forEach(st => {
             if (!st.currentX) return;
             const stx = smWX(st.currentX), sty = smWY(st.currentY);
-            if (Math.abs(stx-sx)>80||Math.abs(sty-sy)>80) return; // clip
+            if (stx < -20 || stx > cw+20 || sty < -20 || sty > ch+20) return;
             const isY = st.type==='shipyard';
-            ctx2.strokeStyle = isY ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.35)';
-            ctx2.lineWidth = isY ? 1.5 : 1;
-            ctx2.strokeRect(stx-2.5, sty-2.5, 5, 5);
+            const sz = isY ? 5 : 4;
+            ctx2.strokeStyle = isY ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.5)';
+            ctx2.lineWidth = isY ? 2 : 1.5;
+            ctx2.strokeRect(stx-sz, sty-sz, sz*2, sz*2);
+            // Malá tečka uvnitř
+            ctx2.beginPath(); ctx2.arc(stx, sty, 1.5, 0, Math.PI*2);
+            ctx2.fillStyle = '#000'; ctx2.fill();
+            // Název vždy viditelný
+            ctx2.fillStyle = isY ? 'rgba(0,0,0,0.8)' : 'rgba(0,0,0,0.55)';
+            ctx2.font = isY ? 'bold 8px "Share Tech Mono",monospace' : '8px "Share Tech Mono",monospace';
+            ctx2.textAlign = 'center';
+            ctx2.fillText(st.name, stx, sty + sz + 9);
+            if (isY) {
+                ctx2.fillStyle = 'rgba(0,0,0,0.4)';
+                ctx2.font = '7px "Share Tech Mono",monospace';
+                ctx2.fillText('⭐', stx, sty - sz - 3);
+            }
         });
 
         // Planety (tečky + jméno)
@@ -577,7 +591,7 @@ function initStarMapControls() {
         const worldY = smInvY(mouseCanvasY);
         // Změna scale
         const factor = e.deltaY < 0 ? 1.15 : 0.87;
-        smScale = Math.max(0.15, Math.min(12, smScale * factor));
+        smScale = Math.max(0.1, Math.min(50, smScale * factor));
         // Po změně scale zajisti že světová souřadnice zůstane pod kurzorem
         // smWX(worldX) musí = mouseCanvasX
         // _smCX + (worldX - _smMapCX) * newAutoScale = mouseCanvasX
@@ -626,8 +640,7 @@ function updateCompass() {
     if (!waypoint) { el.style.display = 'none'; return; }
     el.style.display = 'flex';
     const dx = waypoint.x - ship.x, dy = waypoint.y - ship.y;
-    const angle = Math.atan2(dy, dx);
-    const relAngle = angle - ship.angle;
+    const angle = Math.atan2(dy, dx); // absolutní světový úhel
     const dist = Math.sqrt(dx*dx + dy*dy);
     const distStr = dist > ILY*0.5
         ? `${(dist/ILY).toFixed(2)} LY`
@@ -644,7 +657,7 @@ function updateCompass() {
     cc.clearRect(0, 0, cv.width, cv.height);
     cc.save();
     cc.translate(s, s);
-    cc.rotate(relAngle + Math.PI/2); // +90° protože šipka míří nahoru
+    cc.rotate(angle + Math.PI/2); // absolutní směr, +90° protože šipka míří nahoru
     // Tučná šipka
     cc.beginPath();
     cc.moveTo(0, -s+4);           // špička
