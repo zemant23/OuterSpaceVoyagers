@@ -82,10 +82,12 @@ const SYSTEMS_DATA = [
             {id:'mars',   name:'Mars',   distanceAU:1.52, radius:16, color:'#EF5350', orbitAngle:3.5,  orbitSpeed:0.000059},
         ],
         stations:[
-            {id:'st_gateway', name:'Gateway Station', angleAU:1.15, orbitAngle:1.2, orbitSpeed:0.00009,  type:'trade',    description:'Hlavní obchodní uzel poblíž Země.'},
-            {id:'st_ceres',   name:'Ceres Outpost',   angleAU:1.35, orbitAngle:4.1, orbitSpeed:0.000075, type:'trade',    description:'Těžební stanice v pásu asteroidů.'},
-            {id:'st_foundry', name:'Foundry Shipyard',angleAU:0.85, orbitAngle:5.5, orbitSpeed:0.00013,  type:'shipyard', description:'⭐ Loděnice – zde koupíš nové lodě.'},
-            {id:'st_frontier',name:'Frontier Dock',   angleAU:1.68, orbitAngle:2.8, orbitSpeed:0.000052, type:'shipyard', description:'⭐ Loděnice – zde koupíš nové lodě.'},
+            {id:'st_gateway', name:'Gateway Station',  angleAU:1.10, orbitAngle:1.2,  orbitSpeed:0.00009,  type:'trade',    description:'Hlavní obchodní uzel poblíž Země.'},
+            {id:'st_ceres',   name:'Ceres Outpost',    angleAU:1.40, orbitAngle:4.1,  orbitSpeed:0.000075, type:'trade',    description:'Těžební stanice v pásu asteroidů.'},
+            {id:'st_helios',  name:'Helios Trading Co',angleAU:0.65, orbitAngle:2.8,  orbitSpeed:0.00015,  type:'trade',    description:'Rychle obíhající obchodní platforma.'},
+            {id:'st_olympus', name:'Olympus Depot',    angleAU:1.80, orbitAngle:0.9,  orbitSpeed:0.000045, type:'trade',    description:'Zásobovací depot na okraji soustavy.'},
+            {id:'st_foundry', name:'Foundry Shipyard', angleAU:0.90, orbitAngle:5.5,  orbitSpeed:0.00013,  type:'shipyard', description:'⭐ Loděnice – zde koupíš nové lodě.'},
+            {id:'st_frontier',name:'Frontier Dock',    angleAU:1.55, orbitAngle:3.5,  orbitSpeed:0.000055, type:'shipyard', description:'⭐ Loděnice – zde koupíš nové lodě.'},
         ],
         infoSat:{id:'sol_infosat', name:'Sol Info Beacon', angleAU:2.0, orbitAngle:0.5, orbitSpeed:0.00004}
     },
@@ -100,8 +102,11 @@ const SYSTEMS_DATA = [
             {id:'centauri_d', name:'Centauri D',  distanceAU:0.82, radius:14, color:'#80CBC4', orbitAngle:4.5,  orbitSpeed:0.00016},
         ],
         stations:[
-            {id:'ac_hub',   name:'Centauri Hub',    angleAU:0.55, orbitAngle:1.0, orbitSpeed:0.00012, type:'trade',    description:'Obchodní centrum soustavy Alpha Centauri.'},
-            {id:'ac_yard',  name:'New Hope Shipyard',angleAU:1.0,  orbitAngle:3.0, orbitSpeed:0.00008, type:'shipyard', description:'⭐ Loděnice – vzdálená od Sol.'},
+            {id:'ac_hub',    name:'Centauri Hub',      angleAU:0.55, orbitAngle:1.0, orbitSpeed:0.00012,  type:'trade',    description:'Obchodní centrum soustavy Alpha Centauri.'},
+            {id:'ac_market', name:'New Eden Market',   angleAU:0.90, orbitAngle:3.8, orbitSpeed:0.000090, type:'trade',    description:'Rušný trh na okraji vnitřní soustavy.'},
+            {id:'ac_depot',  name:'Proxima Depot',     angleAU:0.30, orbitAngle:5.2, orbitSpeed:0.00020,  type:'trade',    description:'Malá zásobovací stanice u Proximy.'},
+            {id:'ac_reach',  name:'Outer Reach Post',  angleAU:1.25, orbitAngle:2.3, orbitSpeed:0.000065, type:'trade',    description:'Vzdálená obchodní výspa.'},
+            {id:'ac_yard',   name:'New Hope Shipyard', angleAU:1.05, orbitAngle:3.0, orbitSpeed:0.00008,  type:'shipyard', description:'⭐ Loděnice – vzdálená od Sol.'},
         ],
         infoSat:{id:'ac_infosat', name:'Centauri Info Beacon', angleAU:1.4, orbitAngle:2.0, orbitSpeed:0.00006}
     },
@@ -115,7 +120,10 @@ const SYSTEMS_DATA = [
             {id:'barnard_c', name:"Barnard c",  distanceAU:0.40, radius:18, color:'#A5D6A7', orbitAngle:3.2,  orbitSpeed:0.00045},
         ],
         stations:[
-            {id:'bs_outpost', name:'Red Outpost', angleAU:0.7, orbitAngle:2.0, orbitSpeed:0.00011, type:'trade', description:'Odlehlá obchodní stanice u červeného trpaslíka.'},
+            {id:'bs_outpost', name:'Red Outpost',       angleAU:0.70, orbitAngle:2.0, orbitSpeed:0.00011,  type:'trade', description:'Odlehlá obchodní stanice u červeného trpaslíka.'},
+            {id:'bs_mining',  name:'Barnard Mining Co', angleAU:0.45, orbitAngle:4.5, orbitSpeed:0.00016,  type:'trade', description:'Těžební stanice na vnitřní orbitě.'},
+            {id:'bs_haven',   name:'Dim Light Haven',   angleAU:1.10, orbitAngle:1.2, orbitSpeed:0.000075, type:'trade', description:'Zásobovací stanice v temné soustavě.'},
+            {id:'bs_transit', name:'Transit Point B',   angleAU:0.85, orbitAngle:3.3, orbitSpeed:0.000095, type:'trade', description:'Přestupní bod pro vzdálené trasy.'},
         ],
         infoSat:{id:'bs_infosat', name:"Barnard Info Beacon", angleAU:1.0, orbitAngle:4.5, orbitSpeed:0.00009}
     }
@@ -183,17 +191,32 @@ function tryGenerateSystem(px, py) {
         });
     }
     const sysName = generateStarName();
+    // Generuj 2-4 obchodní stanice na různých orbitách
+    const numStations = 2 + Math.floor(Math.random()*3);
+    const stations = [];
+    const stationNames = ['Trading Post','Depot','Outpost','Market','Hub','Platform','Nexus','Waypoint'];
+    const usedAngles = [];
+    for (let si=0; si<numStations; si++) {
+        let ang; do { ang = Math.random()*Math.PI*2; } while (usedAngles.some(a=>Math.abs(a-ang)<0.8));
+        usedAngles.push(ang);
+        const isShipyard = si===0 && Math.random()<0.3; // 30% šance na loděnici na první stanici
+        stations.push({
+            id:`${id}_st${si}`,
+            name:`${sysName} ${stationNames[Math.floor(Math.random()*stationNames.length)]}`,
+            angleAU: 0.4 + si*0.4 + Math.random()*0.3,
+            orbitAngle: ang,
+            orbitSpeed: 0.00006 + Math.random()*0.00012,
+            type: isShipyard ? 'shipyard' : 'trade',
+            description: isShipyard ? `⭐ Loděnice v soustavě ${sysName}.` : `Obchodní stanice v soustavě ${sysName}.`
+        });
+    }
+    const maxAU = Math.max(...stations.map(s=>s.angleAU));
     const newSys = {
         id, name:sysName, x:px + (Math.random()-0.5)*ILY*0.3, y:py + (Math.random()-0.5)*ILY*0.3,
         starColor:st.color, starRadius:st.radius, starType:st.type, discovered:true,
-        planets,
-        stations:[{
-            id:`${id}_st0`, name:`${sysName} Station`,
-            angleAU:planets[0].distanceAU+0.2+Math.random()*0.3,
-            orbitAngle:Math.random()*Math.PI*2, orbitSpeed:0.00008+Math.random()*0.0001,
-            type:'trade', description:`Vzdálená obchodní stanice v soustavě ${sysName}.`
-        }],
-        infoSat:{id:`${id}_infosat`, name:`${sysName} Beacon`, angleAU:planets[planets.length-1].distanceAU+0.5, orbitAngle:Math.random()*Math.PI*2, orbitSpeed:0.00003+Math.random()*0.00003}
+        planets,  // pouze vizuál – žádný market
+        stations,
+        infoSat:{id:`${id}_infosat`, name:`${sysName} Beacon`, angleAU:maxAU+0.4, orbitAngle:Math.random()*Math.PI*2, orbitSpeed:0.00003+Math.random()*0.00003}
     };
     generatedSystems.push(newSys);
     saveGeneratedSystem(newSys);
@@ -221,7 +244,8 @@ function checkWorldGen() {
 let marketPrices = {};
 function initMarket() {
     getAllSystems().forEach(sys => {
-        [...sys.planets, ...(sys.stations||[])].forEach(loc => {
+        // Pouze stanice mají market, planety jsou jen vizuál
+        (sys.stations||[]).forEach(loc => {
             if (!marketPrices[loc.id]) initLocMarket(loc.id);
         });
     });
@@ -637,10 +661,7 @@ function updatePhysics(dt) {
 
 function getNearby() {
     for (const sys of getAllSystems()) {
-        for (const p of sys.planets) {
-            if (!p.currentX) continue;
-            if (Math.sqrt((ship.x-p.currentX)**2+(ship.y-p.currentY)**2) < p.radius+ship.landRadius) return p;
-        }
+        // Planety jsou pouze vizuál – přeskočit
         for (const s of (sys.stations||[])) {
             if (!s.currentX) continue;
             if (Math.sqrt((ship.x-s.currentX)**2+(ship.y-s.currentY)**2) < 65) return s;
@@ -1571,7 +1592,7 @@ function closeInfoSat() {
 
 // Tabulka cen všech planet soustavy
 function renderInfoSatMain(sys) {
-    const locs = [...sys.planets, ...(sys.stations||[])];
+    const locs = [...(sys.stations||[])]; // planety jsou pouze vizuál
     let h = `<div class="is-section-title">// CENY V SOUSTAVĚ</div>`;
     h += `<table class="is-tbl"><thead><tr><th>Lokace</th>`;
     COMMODITIES.forEach(c => { h += `<th title="${c.name}">${c.name.slice(0,4).toUpperCase()}</th>`; });
@@ -1615,7 +1636,7 @@ function buyScan(commodityId, commodityName) {
     // Sesbírej ceny ze všech lokací ve všech soustavách
     const results = [];
     getAllSystems().forEach(sys => {
-        [...sys.planets, ...(sys.stations||[])].forEach(loc => {
+        (sys.stations||[]).forEach(loc => {
             const pr = getMarketPrice(loc.id, commodityId);
             results.push({ locName: loc.name, sysName: sys.name, price: pr, locId: loc.id });
         });
